@@ -4,6 +4,7 @@ import type { FrameBytes, FrameListener, PreviewMetrics } from "../lib/tauri";
 interface VideoPreviewProps {
   subscribe: (listener: FrameListener) => () => void;
   running: boolean;
+  telemetryEnabled: boolean;
   onMetrics: (metrics: PreviewMetrics) => void;
 }
 
@@ -12,7 +13,12 @@ interface PendingFrame {
   receivedAt: number;
 }
 
-export function VideoPreview({ subscribe, running, onMetrics }: VideoPreviewProps) {
+export function VideoPreview({
+  subscribe,
+  running,
+  telemetryEnabled,
+  onMetrics,
+}: VideoPreviewProps) {
   const imageRef = useRef<HTMLImageElement>(null);
 
   useEffect(() => {
@@ -25,7 +31,7 @@ export function VideoPreview({ subscribe, running, onMetrics }: VideoPreviewProp
     let animationFrame: number | null = null;
     let pendingLoad = false;
     const objectUrls = new Set<string>();
-    let intervalStarted = performance.now();
+    let intervalStarted = telemetryEnabled ? performance.now() : 0;
     let intervalReceived = 0;
     let intervalRendered = 0;
     let intervalBytes = 0;
@@ -43,13 +49,15 @@ export function VideoPreview({ subscribe, running, onMetrics }: VideoPreviewProp
       objectUrls.add(url);
       latestFrame = null;
 
-      if (pendingLoad) droppedFrames += 1;
-      pendingLoad = true;
+      if (telemetryEnabled && pendingLoad) droppedFrames += 1;
+      pendingLoad = telemetryEnabled;
       image.onload = () => {
         pendingLoad = false;
-        intervalRendered += 1;
-        intervalDrawLatency += performance.now() - frame.receivedAt;
-        intervalDrawSamples += 1;
+        if (telemetryEnabled) {
+          intervalRendered += 1;
+          intervalDrawLatency += performance.now() - frame.receivedAt;
+          intervalDrawSamples += 1;
+        }
         for (const existingUrl of objectUrls) {
           if (existingUrl !== url) {
             URL.revokeObjectURL(existingUrl);
@@ -69,43 +77,51 @@ export function VideoPreview({ subscribe, running, onMetrics }: VideoPreviewProp
     };
 
     const unsubscribe = subscribe((frame) => {
-      if (latestFrame) droppedFrames += 1;
-      latestFrame = { bytes: frame, receivedAt: performance.now() };
-      intervalReceived += 1;
-      intervalBytes += frame.byteLength;
+      if (telemetryEnabled && latestFrame) droppedFrames += 1;
+      latestFrame = {
+        bytes: frame,
+        receivedAt: telemetryEnabled ? performance.now() : 0,
+      };
+      if (telemetryEnabled) {
+        intervalReceived += 1;
+        intervalBytes += frame.byteLength;
+      }
       if (animationFrame === null) {
         animationFrame = requestAnimationFrame(paintLatestFrame);
       }
     });
 
-    const metricsInterval = window.setInterval(() => {
-      const now = performance.now();
-      const elapsedSeconds = (now - intervalStarted) / 1_000;
-      if (elapsedSeconds <= 0) return;
+    const metricsInterval = telemetryEnabled
+      ? window.setInterval(() => {
+          const now = performance.now();
+          const elapsedSeconds = (now - intervalStarted) / 1_000;
+          if (elapsedSeconds <= 0) return;
 
-      onMetrics({
-        receivedFps: intervalReceived / elapsedSeconds,
-        renderedFps: intervalRendered / elapsedSeconds,
-        receiveMbps: (intervalBytes * 8) / elapsedSeconds / 1_000_000,
-        receiveToDrawMs: intervalDrawSamples === 0 ? 0 : intervalDrawLatency / intervalDrawSamples,
-        droppedFrames,
-      });
-      intervalStarted = now;
-      intervalReceived = 0;
-      intervalRendered = 0;
-      intervalBytes = 0;
-      intervalDrawLatency = 0;
-      intervalDrawSamples = 0;
-    }, 1_000);
+          onMetrics({
+            receivedFps: intervalReceived / elapsedSeconds,
+            renderedFps: intervalRendered / elapsedSeconds,
+            receiveMbps: (intervalBytes * 8) / elapsedSeconds / 1_000_000,
+            receiveToDrawMs:
+              intervalDrawSamples === 0 ? 0 : intervalDrawLatency / intervalDrawSamples,
+            droppedFrames,
+          });
+          intervalStarted = now;
+          intervalReceived = 0;
+          intervalRendered = 0;
+          intervalBytes = 0;
+          intervalDrawLatency = 0;
+          intervalDrawSamples = 0;
+        }, 1_000)
+      : null;
 
     return () => {
       unsubscribe();
-      window.clearInterval(metricsInterval);
+      if (metricsInterval !== null) window.clearInterval(metricsInterval);
       if (animationFrame !== null) cancelAnimationFrame(animationFrame);
       for (const url of objectUrls) URL.revokeObjectURL(url);
       imageRef.current?.removeAttribute("src");
     };
-  }, [running, subscribe, onMetrics]);
+  }, [running, telemetryEnabled, subscribe, onMetrics]);
 
   return (
     <section className="preview-shell" aria-label="ShadowCast video preview">

@@ -52,6 +52,7 @@ pub struct CaptureStatus {
     average_jpeg_bytes: f64,
     channel_mbps: f64,
     average_channel_send_ms: f64,
+    telemetry_enabled: bool,
     error: Option<String>,
 }
 
@@ -79,6 +80,7 @@ impl Default for CaptureStatus {
             average_jpeg_bytes: 0.0,
             channel_mbps: 0.0,
             average_channel_send_ms: 0.0,
+            telemetry_enabled: false,
             error: None,
         }
     }
@@ -92,6 +94,7 @@ struct ActiveCapture {
 pub struct CaptureManager {
     active: Mutex<Option<ActiveCapture>>,
     status: Arc<Mutex<CaptureStatus>>,
+    telemetry_enabled: Arc<AtomicBool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -109,6 +112,7 @@ impl Default for CaptureManager {
         Self {
             active: Mutex::new(None),
             status: Arc::new(Mutex::new(CaptureStatus::default())),
+            telemetry_enabled: Arc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -127,9 +131,11 @@ impl CaptureManager {
             let _ = finished.thread.join();
         }
 
+        let telemetry_enabled = self.telemetry_enabled.load(AtomicOrdering::Acquire);
         update_status(&self.status, |status| {
             *status = CaptureStatus {
                 state: CaptureState::Starting,
+                telemetry_enabled,
                 ..CaptureStatus::default()
             };
         });
@@ -137,11 +143,20 @@ impl CaptureManager {
         let stop = Arc::new(AtomicBool::new(false));
         let thread_stop = Arc::clone(&stop);
         let thread_status = Arc::clone(&self.status);
+        let thread_telemetry_enabled = Arc::clone(&self.telemetry_enabled);
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
 
         let capture_thread = thread::Builder::new()
             .name("shadowcast-capture".to_owned())
-            .spawn(move || run_capture(on_frame, thread_stop, thread_status, ready_tx))
+            .spawn(move || {
+                run_capture(
+                    on_frame,
+                    thread_stop,
+                    thread_status,
+                    thread_telemetry_enabled,
+                    ready_tx,
+                );
+            })
             .map_err(|error| format!("Failed to spawn capture thread: {error}"))?;
 
         match ready_rx.recv() {
@@ -189,6 +204,20 @@ impl CaptureManager {
     fn status(&self) -> CaptureStatus {
         lock(&self.status).clone()
     }
+
+    fn set_telemetry_enabled(&self, enabled: bool) -> CaptureStatus {
+        self.telemetry_enabled
+            .store(enabled, AtomicOrdering::Release);
+        update_status(&self.status, |status| {
+            status.telemetry_enabled = enabled;
+            reset_telemetry_metrics(status);
+        });
+        lock(&self.status).clone()
+    }
+
+    fn telemetry_enabled(&self) -> bool {
+        self.telemetry_enabled.load(AtomicOrdering::Acquire)
+    }
 }
 
 impl Drop for CaptureManager {
@@ -221,7 +250,15 @@ pub fn get_capture_status(manager: State<'_, CaptureManager>) -> CaptureStatus {
 }
 
 #[tauri::command]
-pub fn report_preview_metrics(metrics: PreviewMetrics) {
+pub fn set_telemetry_enabled(manager: State<'_, CaptureManager>, enabled: bool) -> CaptureStatus {
+    manager.set_telemetry_enabled(enabled)
+}
+
+#[tauri::command]
+pub fn report_preview_metrics(manager: State<'_, CaptureManager>, metrics: PreviewMetrics) {
+    if !manager.telemetry_enabled() {
+        return;
+    }
     info!(
         received_fps = metrics.received_fps,
         rendered_fps = metrics.rendered_fps,
@@ -236,10 +273,11 @@ fn run_capture(
     on_frame: Channel<Response>,
     stop: Arc<AtomicBool>,
     status: Arc<Mutex<CaptureStatus>>,
+    telemetry_enabled: Arc<AtomicBool>,
     ready: mpsc::SyncSender<Result<CaptureStatus, String>>,
 ) {
     let mut ready = Some(ready);
-    let result = capture_loop(&on_frame, &stop, &status, &mut ready);
+    let result = capture_loop(&on_frame, &stop, &status, &telemetry_enabled, &mut ready);
 
     if let Err(message) = result {
         error!(error = %message, "ShadowCast capture failed");
@@ -264,6 +302,7 @@ fn capture_loop(
     on_frame: &Channel<Response>,
     stop: &AtomicBool,
     status: &Arc<Mutex<CaptureStatus>>,
+    telemetry_enabled: &AtomicBool,
     ready: &mut Option<mpsc::SyncSender<Result<CaptureStatus, String>>>,
 ) -> Result<(), String> {
     let devices = query(ApiBackend::MediaFoundation)
@@ -352,7 +391,12 @@ fn capture_loop(
     );
 
     update_status(status, |capture_status| {
-        *capture_status = running_status(device_name, requested_format, stream_format);
+        *capture_status = running_status(
+            device_name,
+            requested_format,
+            stream_format,
+            telemetry_enabled.load(AtomicOrdering::Acquire),
+        );
     });
 
     if let Some(ready) = ready.take() {
@@ -360,11 +404,13 @@ fn capture_loop(
     }
 
     let mut total_frames = 0_u64;
+    let mut total_telemetry_frames = 0_u64;
     let mut total_jpeg_bytes = 0_u64;
     let mut interval_frames = 0_u64;
     let mut interval_jpeg_bytes = 0_u64;
     let mut interval_channel_send = Duration::ZERO;
     let mut interval_started = Instant::now();
+    let mut telemetry_was_enabled = false;
 
     while !stop.load(AtomicOrdering::Acquire) {
         let frame = camera
@@ -390,48 +436,64 @@ fn capture_loop(
             jpeg.into_inner()
         };
 
+        let telemetry_active = telemetry_enabled.load(AtomicOrdering::Acquire);
+        if telemetry_active && !telemetry_was_enabled {
+            total_telemetry_frames = 0;
+            total_jpeg_bytes = 0;
+            interval_frames = 0;
+            interval_jpeg_bytes = 0;
+            interval_channel_send = Duration::ZERO;
+            interval_started = Instant::now();
+        }
+
         let jpeg_bytes = jpeg.len() as u64;
-        let channel_send_started = Instant::now();
+        let channel_send_started = telemetry_active.then(Instant::now);
         if on_frame.send(Response::new(jpeg)).is_err() {
             info!("frontend frame channel closed");
             break;
         }
-        let channel_send_elapsed = channel_send_started.elapsed();
+        let channel_send_elapsed = channel_send_started.map(|started| started.elapsed());
 
         total_frames += 1;
-        total_jpeg_bytes += jpeg_bytes;
-        interval_frames += 1;
-        interval_jpeg_bytes += jpeg_bytes;
-        interval_channel_send += channel_send_elapsed;
-        let elapsed = interval_started.elapsed();
-        if elapsed >= Duration::from_secs(1) {
-            let measured_fps = interval_frames as f64 / elapsed.as_secs_f64();
-            let channel_mbps =
-                interval_jpeg_bytes as f64 * 8.0 / elapsed.as_secs_f64() / 1_000_000.0;
-            let average_jpeg_bytes = total_jpeg_bytes as f64 / total_frames as f64;
-            let average_channel_send_ms =
-                interval_channel_send.as_secs_f64() * 1_000.0 / interval_frames as f64;
-            update_status(status, |capture_status| {
-                capture_status.frame_count = total_frames;
-                capture_status.measured_fps = measured_fps;
-                capture_status.jpeg_bytes = total_jpeg_bytes;
-                capture_status.average_jpeg_bytes = average_jpeg_bytes;
-                capture_status.channel_mbps = channel_mbps;
-                capture_status.average_channel_send_ms = average_channel_send_ms;
-            });
-            info!(
-                capture_fps = measured_fps,
-                average_jpeg_kib = average_jpeg_bytes / 1024.0,
-                channel_mbps,
-                average_channel_send_ms,
-                total_frames,
-                "capture performance"
-            );
-            interval_started = Instant::now();
-            interval_frames = 0;
-            interval_jpeg_bytes = 0;
-            interval_channel_send = Duration::ZERO;
+        if telemetry_active {
+            total_telemetry_frames += 1;
+            total_jpeg_bytes += jpeg_bytes;
+            interval_frames += 1;
+            interval_jpeg_bytes += jpeg_bytes;
+            interval_channel_send += channel_send_elapsed.unwrap_or_default();
+            let elapsed = interval_started.elapsed();
+            if elapsed >= Duration::from_secs(1) {
+                let measured_fps = interval_frames as f64 / elapsed.as_secs_f64();
+                let channel_mbps =
+                    interval_jpeg_bytes as f64 * 8.0 / elapsed.as_secs_f64() / 1_000_000.0;
+                let average_jpeg_bytes = total_jpeg_bytes as f64 / total_telemetry_frames as f64;
+                let average_channel_send_ms =
+                    interval_channel_send.as_secs_f64() * 1_000.0 / interval_frames as f64;
+                update_status(status, |capture_status| {
+                    if capture_status.telemetry_enabled {
+                        capture_status.frame_count = total_frames;
+                        capture_status.measured_fps = measured_fps;
+                        capture_status.jpeg_bytes = total_jpeg_bytes;
+                        capture_status.average_jpeg_bytes = average_jpeg_bytes;
+                        capture_status.channel_mbps = channel_mbps;
+                        capture_status.average_channel_send_ms = average_channel_send_ms;
+                    }
+                });
+                info!(
+                    capture_fps = measured_fps,
+                    average_jpeg_kib = average_jpeg_bytes / 1024.0,
+                    channel_mbps,
+                    average_channel_send_ms,
+                    total_frames,
+                    "capture performance"
+                );
+                interval_started = Instant::now();
+                interval_frames = 0;
+                interval_jpeg_bytes = 0;
+                interval_channel_send = Duration::ZERO;
+            }
         }
+        telemetry_was_enabled = telemetry_active;
     }
 
     if let Err(error) = camera.stop_stream() {
@@ -439,12 +501,14 @@ fn capture_loop(
     }
     update_status(status, |capture_status| {
         capture_status.frame_count = total_frames;
-        capture_status.jpeg_bytes = total_jpeg_bytes;
-        capture_status.average_jpeg_bytes = if total_frames == 0 {
-            0.0
-        } else {
-            total_jpeg_bytes as f64 / total_frames as f64
-        };
+        if telemetry_enabled.load(AtomicOrdering::Acquire) {
+            capture_status.jpeg_bytes = total_jpeg_bytes;
+            capture_status.average_jpeg_bytes = if total_telemetry_frames == 0 {
+                0.0
+            } else {
+                total_jpeg_bytes as f64 / total_telemetry_frames as f64
+            };
+        }
     });
     Ok(())
 }
@@ -464,6 +528,7 @@ fn running_status(
     device_name: String,
     requested_format: CameraFormat,
     stream_format: CameraFormat,
+    telemetry_enabled: bool,
 ) -> CaptureStatus {
     CaptureStatus {
         state: CaptureState::Running,
@@ -483,8 +548,17 @@ fn running_status(
         average_jpeg_bytes: 0.0,
         channel_mbps: 0.0,
         average_channel_send_ms: 0.0,
+        telemetry_enabled,
         error: None,
     }
+}
+
+fn reset_telemetry_metrics(status: &mut CaptureStatus) {
+    status.measured_fps = 0.0;
+    status.jpeg_bytes = 0;
+    status.average_jpeg_bytes = 0.0;
+    status.channel_mbps = 0.0;
+    status.average_channel_send_ms = 0.0;
 }
 
 fn select_preferred_format(formats: &[CameraFormat]) -> Option<CameraFormat> {
@@ -566,12 +640,40 @@ mod tests {
         // currently reports the denominator after refreshing the stream.
         let stream_format = CameraFormat::new_from(1280, 720, FrameFormat::MJPEG, 1);
 
-        let status = running_status("ShadowCast".to_owned(), requested_format, stream_format);
+        let status = running_status(
+            "ShadowCast".to_owned(),
+            requested_format,
+            stream_format,
+            false,
+        );
 
         assert_eq!(status.target_fps, Some(60));
         assert_eq!(status.measured_fps, 0.0);
         assert_eq!(status.width, Some(1280));
         assert_eq!(status.height, Some(720));
         assert_eq!(status.frame_format.as_deref(), Some("MJPEG"));
+        assert!(!status.telemetry_enabled);
+    }
+
+    #[test]
+    fn telemetry_is_disabled_by_default_and_resets_detailed_metrics() {
+        let manager = CaptureManager::default();
+        assert!(!manager.status().telemetry_enabled);
+
+        update_status(&manager.status, |status| {
+            status.measured_fps = 60.0;
+            status.jpeg_bytes = 1024;
+            status.average_jpeg_bytes = 512.0;
+            status.channel_mbps = 8.0;
+            status.average_channel_send_ms = 0.1;
+        });
+
+        let status = manager.set_telemetry_enabled(true);
+        assert!(status.telemetry_enabled);
+        assert_eq!(status.measured_fps, 0.0);
+        assert_eq!(status.jpeg_bytes, 0);
+        assert_eq!(status.average_jpeg_bytes, 0.0);
+        assert_eq!(status.channel_mbps, 0.0);
+        assert_eq!(status.average_channel_send_ms, 0.0);
     }
 }

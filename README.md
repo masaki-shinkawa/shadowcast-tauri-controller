@@ -52,6 +52,8 @@ cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 
 30分連続試験の手順、入力から実画面表示までの遅延測定方法、基準結果、画像解析へ割り当て可能な処理予算は[性能ベースライン](docs/performance-baseline.md)を参照してください。CPUとメモリのCSV採取には次のスクリプトを使用します。
 
+詳細テレメトリは通常時の計測コストを避けるため既定で無効です。計測前に`CAPTURE STATUS`の`TELEMETRY OFF`ボタンを押して`ON`へ切り替えてください。
+
 ```powershell
 .\scripts\measure-performance.ps1 -DurationMinutes 30
 ```

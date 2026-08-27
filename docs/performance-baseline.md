@@ -33,15 +33,16 @@ ShadowCast → Windows Media Foundation → nokhwa → Tauri Channel → WebView
 ## 30分連続試験
 
 1. ShadowCastを接続し、ShadowCastを使用する他のアプリを終了する。
-2. releaseビルドを起動して`Start capture`を押し、状態が`RUNNING`になることを確認する。
-3. 別のPowerShellで次を実行する。
+2. releaseビルドを起動し、`CAPTURE STATUS`のテレメトリを`ON`へ切り替える。
+3. `Start capture`を押し、状態が`RUNNING`になることを確認する。
+4. 別のPowerShellで次を実行する。
 
    ```powershell
    .\scripts\measure-performance.ps1 -DurationMinutes 30
    ```
 
-4. `artifacts/benchmarks/`に生成されたCSVとsummary JSONを保存する。
-5. 30分後も`RUNNING`であること、フレーム数が増加していること、エラーがないことを確認する。
+5. `artifacts/benchmarks/`に生成されたCSVとsummary JSONを保存する。
+6. 30分後も`RUNNING`であること、フレーム数が増加していること、エラーがないことを確認する。
 
 スクリプトはTauriプロセスと、その子孫のWebView2プロセスをまとめて採取する。`cpu_percent_machine`は全論理プロセッサに対する割合、`cpu_percent_one_core`は1論理コアを100%とする合計値である。Working Setは共有ページを含むため、リーク判断にはPrivateメモリの開始・終了差も併用する。
 

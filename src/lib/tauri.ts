@@ -15,6 +15,7 @@ export interface CaptureStatus {
   averageJpegBytes: number;
   channelMbps: number;
   averageChannelSendMs: number;
+  telemetryEnabled: boolean;
   error: string | null;
 }
 
@@ -64,6 +65,10 @@ export async function stopCapture(): Promise<CaptureStatus> {
 
 export async function getCaptureStatus(): Promise<CaptureStatus> {
   return invoke<CaptureStatus>("get_capture_status");
+}
+
+export async function setTelemetryEnabled(enabled: boolean): Promise<CaptureStatus> {
+  return invoke<CaptureStatus>("set_telemetry_enabled", { enabled });
 }
 
 export async function reportPreviewMetrics(metrics: PreviewMetrics): Promise<void> {
