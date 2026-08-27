@@ -1,17 +1,22 @@
 use std::{
     sync::{Arc, Condvar, Mutex, MutexGuard},
     thread::{self, JoinHandle},
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use image::RgbImage;
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
+use crate::game_state::{
+    GameSignals, GameStateDetector, GameStateProfile, GameStateSnapshot, GameStateTransition,
+};
+
 const DEFAULT_MAX_FPS: u32 = 15;
 const MAX_ANALYSIS_FPS: u32 = 60;
 const MAX_TEMPLATE_DIMENSION: u32 = 64;
 const TEMPLATE_COMPARISON_BUDGET: u64 = 4_000_000;
+const MAX_STATE_TRANSITIONS: usize = 50;
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -134,6 +139,9 @@ pub struct AnalysisStatus {
     measured_fps: f64,
     average_analysis_ms: f64,
     last_result: Option<AnalysisResult>,
+    game_state_profile: GameStateProfile,
+    game_state: GameStateSnapshot,
+    state_transitions: Vec<GameStateTransition>,
     error: Option<String>,
 }
 
@@ -149,6 +157,9 @@ impl Default for AnalysisStatus {
             measured_fps: 0.0,
             average_analysis_ms: 0.0,
             last_result: None,
+            game_state_profile: GameStateProfile::default(),
+            game_state: GameStateSnapshot::default(),
+            state_transitions: Vec::new(),
             error: None,
         }
     }
@@ -438,6 +449,8 @@ fn run_analysis_worker(
     let mut interval_started = Instant::now();
     let mut interval_frames = 0_u64;
     let mut total_analysis_time = Duration::ZERO;
+    let detector_started = Instant::now();
+    let mut state_detector = GameStateDetector::default();
 
     while let Some(frame) = queue.take_after(next_allowed) {
         let (current_config, current_template) = {
@@ -457,8 +470,32 @@ fn run_analysis_worker(
             current_template.as_ref(),
         ) {
             Ok(mut result) => {
-                let elapsed = started.elapsed();
                 result.queue_delay_ms = queue_delay.as_secs_f64() * 1_000.0;
+                let transition = state_detector.observe(
+                    GameSignals {
+                        average_rgb: [
+                            result.color.average.red,
+                            result.color.average.green,
+                            result.color.average.blue,
+                        ],
+                        target_color_ratio: result.color.match_ratio,
+                        template_score: result.template_match.as_ref().map(|item| item.score),
+                    },
+                    result.frame_number,
+                    unix_time_ms(),
+                    detector_started.elapsed().as_millis() as u64,
+                );
+                if let Some(event) = &transition {
+                    info!(
+                        from = ?event.from,
+                        to = ?event.to,
+                        confidence = event.confidence,
+                        frame_number = event.frame_number,
+                        reason = %event.reason,
+                        "game state transitioned"
+                    );
+                }
+                let elapsed = started.elapsed();
                 result.analysis_ms = elapsed.as_secs_f64() * 1_000.0;
                 total_analysis_time += elapsed;
                 interval_frames += 1;
@@ -472,7 +509,14 @@ fn run_analysis_worker(
                 } else {
                     None
                 };
-                record_analysis_success(&status, total_analysis_time, measured_fps, result);
+                record_analysis_success(
+                    &status,
+                    total_analysis_time,
+                    measured_fps,
+                    result,
+                    state_detector.snapshot(),
+                    transition,
+                );
             }
             Err(message) => {
                 warn!(error = %message, frame_number = frame.number, "frame analysis failed");
@@ -501,6 +545,8 @@ fn record_analysis_success(
     total_analysis_time: Duration,
     measured_fps: Option<f64>,
     result: AnalysisResult,
+    game_state: GameStateSnapshot,
+    transition: Option<GameStateTransition>,
 ) {
     update_status(status, |analysis_status| {
         analysis_status.analyzed_frames += 1;
@@ -514,6 +560,13 @@ fn record_analysis_success(
             analysis_status.measured_fps = 0.0;
         }
         analysis_status.last_result = Some(result);
+        analysis_status.game_state = game_state;
+        if let Some(event) = transition {
+            analysis_status.state_transitions.push(event);
+            if analysis_status.state_transitions.len() > MAX_STATE_TRANSITIONS {
+                analysis_status.state_transitions.remove(0);
+            }
+        }
         analysis_status.error = None;
     });
 }
@@ -727,6 +780,13 @@ fn update_status(status: &Arc<Mutex<AnalysisStatus>>, update: impl FnOnce(&mut A
     update(&mut lock(status));
 }
 
+fn unix_time_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
 #[cfg(test)]
 mod tests {
     use image::{Rgb, RgbImage};
@@ -919,7 +979,14 @@ mod tests {
             current.measured_fps = 12.0;
         });
 
-        record_analysis_success(&status, Duration::from_millis(2), Some(15.0), result);
+        record_analysis_success(
+            &status,
+            Duration::from_millis(2),
+            Some(15.0),
+            result,
+            GameStateSnapshot::default(),
+            None,
+        );
 
         let current = lock(&status);
         assert!(!current.config.enabled);

@@ -93,6 +93,19 @@ export function StatusPanel({
           <dt>Resolution</dt>
           <dd>{formatResolution(status)}</dd>
         </div>
+        <div className="telemetry-row telemetry-row--split">
+          <div>
+            <dt>Game state</dt>
+            <dd className="accent-value">{analysisStatus.gameState.state}</dd>
+          </div>
+          <div>
+            <dt>Confidence / streak</dt>
+            <dd>
+              {(analysisStatus.gameState.confidence * 100).toFixed(1)}% /{" "}
+              {analysisStatus.gameState.consecutiveFrames}
+            </dd>
+          </div>
+        </div>
         {status.telemetryEnabled ? (
           <>
             <div className="telemetry-row telemetry-row--split">
@@ -199,7 +212,10 @@ export function StatusPanel({
         </span>
         <div>
           <strong>Direct MSMF pipeline</strong>
-          <p>Latest-frame worker · {analysisStatus.config.maxFps} FPS budget · bounded queue</p>
+          <p>
+            {analysisStatus.gameStateProfile.name} · {analysisStatus.config.maxFps} FPS ·{" "}
+            {analysisStatus.gameStateProfile.confirmationFrames}-frame confirmation
+          </p>
         </div>
       </div>
 

@@ -83,7 +83,39 @@ export interface AnalysisStatus {
   measuredFps: number;
   averageAnalysisMs: number;
   lastResult: AnalysisResult | null;
+  gameStateProfile: GameStateProfile;
+  gameState: GameStateSnapshot;
+  stateTransitions: GameStateTransition[];
   error: string | null;
+}
+
+export type GameState = "unknown" | "loading" | "gameplay" | "result";
+
+export interface GameStateProfile {
+  name: string;
+  confirmationFrames: number;
+  timeoutMs: number;
+  loadingLumaMax: number;
+  gameplayColorRatioMinPercent: number;
+  resultTemplateScoreMinPercent: number;
+}
+
+export interface GameStateSnapshot {
+  state: GameState;
+  confidence: number;
+  detectedAtMs: number;
+  frameNumber: number;
+  reason: string;
+  consecutiveFrames: number;
+}
+
+export interface GameStateTransition {
+  from: GameState;
+  to: GameState;
+  confidence: number;
+  detectedAtMs: number;
+  frameNumber: number;
+  reason: string;
 }
 
 export interface AnalysisTemplateInput {

@@ -1,5 +1,6 @@
 mod analysis;
 mod capture;
+mod game_state;
 
 use analysis::AnalysisManager;
 use capture::CaptureManager;

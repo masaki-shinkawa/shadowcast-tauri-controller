@@ -51,6 +51,23 @@ const INITIAL_ANALYSIS_STATUS: AnalysisStatus = {
   measuredFps: 0,
   averageAnalysisMs: 0,
   lastResult: null,
+  gameStateProfile: {
+    name: "generic-switch-game-v1",
+    confirmationFrames: 3,
+    timeoutMs: 2000,
+    loadingLumaMax: 24,
+    gameplayColorRatioMinPercent: 20,
+    resultTemplateScoreMinPercent: 90,
+  },
+  gameState: {
+    state: "unknown",
+    confidence: 0,
+    detectedAtMs: 0,
+    frameNumber: 0,
+    reason: "",
+    consecutiveFrames: 0,
+  },
+  stateTransitions: [],
   error: null,
 };
 
