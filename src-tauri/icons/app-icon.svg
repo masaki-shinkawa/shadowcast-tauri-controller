@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <title>ShadowCast Controller</title>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#151c24" />
+      <stop offset="1" stop-color="#070a0e" />
+    </linearGradient>
+    <linearGradient id="signal" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#d2ff76" />
+      <stop offset="1" stop-color="#91df18" />
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" rx="220" fill="url(#background)" />
+  <rect x="186" y="186" width="652" height="652" rx="146" fill="none" stroke="#28343f" stroke-width="28" />
+  <path
+    d="M355 330h230c50 0 90 40 90 90v42h-64v-30c0-22-18-40-40-40H369c-22 0-40 18-40 40v160c0 22 18 40 40 40h202c22 0 40-18 40-40v-30h64v42c0 50-40 90-90 90H355c-50 0-90-40-90-90V420c0-50 40-90 90-90Z"
+    fill="url(#signal)"
+  />
+  <path d="m492 452 176 60-176 60Z" fill="#f7ffed" />
+  <circle cx="740" cy="294" r="38" fill="#b8ff38" />
+</svg>
