@@ -174,7 +174,10 @@ impl CaptureManager {
     }
 
     fn stop(&self, analysis: &AnalysisManager) -> CaptureStatus {
-        let active_capture = lock(&self.active).take();
+        // Keep start and stop linearized so an older stop cannot tear down the
+        // analysis worker belonging to a concurrently started capture.
+        let mut active = lock(&self.active);
+        let active_capture = active.take();
         if let Some(active_capture) = active_capture {
             info!("stopping ShadowCast capture");
             active_capture.stop.store(true, AtomicOrdering::Release);

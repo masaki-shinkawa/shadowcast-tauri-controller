@@ -340,7 +340,12 @@ impl AnalysisManager {
 
     fn configure(&self, config: AnalysisConfig) -> Result<AnalysisStatus, String> {
         validate_config(&config)?;
-        *lock(&self.config) = config.clone();
+        {
+            let mut current_config = lock(&self.config);
+            let current_template = lock(&self.template);
+            validate_template_fits_roi(current_template.as_ref(), config.roi)?;
+            *current_config = config.clone();
+        }
         update_status(&self.status, |status| {
             if !config.enabled {
                 status.measured_fps = 0.0;
@@ -352,7 +357,10 @@ impl AnalysisManager {
 
     fn set_template(&self, input: Option<AnalysisTemplateInput>) -> Result<(), String> {
         let template = input.map(AnalysisTemplate::try_from).transpose()?;
-        *lock(&self.template) = template;
+        let current_config = lock(&self.config);
+        let mut current_template = lock(&self.template);
+        validate_template_fits_roi(template.as_ref(), current_config.roi)?;
+        *current_template = template;
         Ok(())
     }
 }
@@ -429,11 +437,14 @@ fn run_analysis_worker(
     let mut total_analysis_time = Duration::ZERO;
 
     while let Some(frame) = queue.take_after(next_allowed) {
-        let current_config = lock(&config).clone();
+        let (current_config, current_template) = {
+            let current_config = lock(&config);
+            let current_template = lock(&template);
+            (current_config.clone(), current_template.clone())
+        };
         if !current_config.enabled {
             continue;
         }
-        let current_template = lock(&template).clone();
         let started = Instant::now();
         let queue_delay = started.saturating_duration_since(frame.submitted_at);
         match analyze_jpeg(
@@ -458,18 +469,7 @@ fn run_analysis_worker(
                 } else {
                     None
                 };
-                update_status(&status, |analysis_status| {
-                    analysis_status.analyzed_frames += 1;
-                    analysis_status.average_analysis_ms = total_analysis_time.as_secs_f64()
-                        * 1_000.0
-                        / analysis_status.analyzed_frames as f64;
-                    if let Some(fps) = measured_fps {
-                        analysis_status.measured_fps = fps;
-                    }
-                    analysis_status.config = current_config.clone();
-                    analysis_status.last_result = Some(result);
-                    analysis_status.error = None;
-                });
+                record_analysis_success(&status, total_analysis_time, measured_fps, result);
             }
             Err(message) => {
                 warn!(error = %message, frame_number = frame.number, "frame analysis failed");
@@ -491,6 +491,28 @@ fn run_analysis_worker(
         }
     });
     info!("analysis worker stopped");
+}
+
+fn record_analysis_success(
+    status: &Arc<Mutex<AnalysisStatus>>,
+    total_analysis_time: Duration,
+    measured_fps: Option<f64>,
+    result: AnalysisResult,
+) {
+    update_status(status, |analysis_status| {
+        analysis_status.analyzed_frames += 1;
+        analysis_status.average_analysis_ms =
+            total_analysis_time.as_secs_f64() * 1_000.0 / analysis_status.analyzed_frames as f64;
+        if analysis_status.config.enabled {
+            if let Some(fps) = measured_fps {
+                analysis_status.measured_fps = fps;
+            }
+        } else {
+            analysis_status.measured_fps = 0.0;
+        }
+        analysis_status.last_result = Some(result);
+        analysis_status.error = None;
+    });
 }
 
 fn analyze_jpeg(
@@ -598,8 +620,8 @@ fn match_template(
     let search_step = comparison_step(comparisons);
     let mut best = (u64::MAX, roi.x, roi.y);
 
-    for offset_y in (0..positions_y).step_by(search_step as usize) {
-        for offset_x in (0..positions_x).step_by(search_step as usize) {
+    for offset_y in stepped_offsets(positions_y, search_step) {
+        for offset_x in stepped_offsets(positions_x, search_step) {
             let mut difference = 0_u64;
             for template_y in 0..template.height {
                 for template_x in 0..template.width {
@@ -625,6 +647,13 @@ fn match_template(
         score: (1.0 - best.0 as f64 / max_difference).clamp(0.0, 1.0),
         search_step,
     })
+}
+
+fn stepped_offsets(position_count: u32, step: u32) -> impl Iterator<Item = u32> {
+    let last = position_count - 1;
+    (0..position_count)
+        .step_by(step as usize)
+        .chain((!last.is_multiple_of(step)).then_some(last))
 }
 
 fn comparison_step(comparisons: u64) -> u32 {
@@ -653,6 +682,18 @@ fn validate_config(config: &AnalysisConfig) -> Result<(), String> {
         return Err(format!(
             "Analysis max FPS must be between 1 and {MAX_ANALYSIS_FPS}"
         ));
+    }
+    Ok(())
+}
+
+fn validate_template_fits_roi(template: Option<&AnalysisTemplate>, roi: Roi) -> Result<(), String> {
+    if let Some(template) = template {
+        if template.width > roi.width || template.height > roi.height {
+            return Err(format!(
+                "Template {} x {} does not fit configured ROI {} x {}",
+                template.width, template.height, roi.width, roi.height
+            ));
+        }
     }
     Ok(())
 }
@@ -742,6 +783,33 @@ mod tests {
     }
 
     #[test]
+    fn stepped_template_search_includes_right_and_bottom_edge() {
+        let mut image = RgbImage::from_pixel(2_002, 2_002, Rgb([0, 0, 0]));
+        image.put_pixel(2_001, 2_001, Rgb([255, 255, 255]));
+        let template = AnalysisTemplate {
+            width: 1,
+            height: 1,
+            grayscale: vec![255],
+        };
+
+        let result = match_template(
+            &image,
+            Roi {
+                x: 0,
+                y: 0,
+                width: 2_002,
+                height: 2_002,
+            },
+            &template,
+        )
+        .expect("template should fit");
+
+        assert_eq!(result.search_step, 2);
+        assert_eq!((result.x, result.y), (2_001, 2_001));
+        assert_eq!(result.score, 1.0);
+    }
+
+    #[test]
     fn latest_frame_queue_replaces_pending_work() {
         let queue = LatestFrameQueue::default();
         let frame = |number| AnalysisFrame {
@@ -772,5 +840,71 @@ mod tests {
             grayscale: vec![0; 3],
         };
         assert!(AnalysisTemplate::try_from(invalid_template).is_err());
+    }
+
+    #[test]
+    fn template_and_configured_roi_must_remain_compatible() {
+        let manager = AnalysisManager::default();
+        manager
+            .configure(config(Roi {
+                x: 0,
+                y: 0,
+                width: 2,
+                height: 2,
+            }))
+            .expect("configuration should be valid");
+
+        let oversized = AnalysisTemplateInput {
+            width: 3,
+            height: 2,
+            grayscale: vec![0; 6],
+        };
+        assert!(manager.set_template(Some(oversized)).is_err());
+
+        manager
+            .set_template(Some(AnalysisTemplateInput {
+                width: 2,
+                height: 2,
+                grayscale: vec![0; 4],
+            }))
+            .expect("template should fit current ROI");
+
+        let too_small = config(Roi {
+            x: 0,
+            y: 0,
+            width: 1,
+            height: 2,
+        });
+        assert!(manager.configure(too_small).is_err());
+        assert_eq!(manager.status().config.roi.width, 2);
+    }
+
+    #[test]
+    fn completed_frame_does_not_restore_stale_configuration_after_disable() {
+        let image = RgbImage::from_pixel(1, 1, Rgb([0, 255, 0]));
+        let result = analyze_rgb(
+            &image,
+            1,
+            &config(Roi {
+                x: 0,
+                y: 0,
+                width: 1,
+                height: 1,
+            }),
+            None,
+        )
+        .expect("frame should be analyzed");
+        let status = Arc::new(Mutex::new(AnalysisStatus::default()));
+        update_status(&status, |current| {
+            current.config.enabled = false;
+            current.measured_fps = 12.0;
+        });
+
+        record_analysis_success(&status, Duration::from_millis(2), Some(15.0), result);
+
+        let current = lock(&status);
+        assert!(!current.config.enabled);
+        assert_eq!(current.measured_fps, 0.0);
+        assert_eq!(current.analyzed_frames, 1);
     }
 }

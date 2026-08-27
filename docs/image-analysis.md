@@ -71,7 +71,7 @@ await invoke("set_analysis_template", {
 });
 ```
 
-`template: null`でテンプレート判定を無効化できます。テンプレートは1〜64ピクセル四方、`grayscale.length === width * height`である必要があります。
+`template: null`でテンプレート判定を無効化できます。テンプレートは1〜64ピクセル四方、`grayscale.length === width * height`で、設定中のROI内に収まる必要があります。テンプレート設定後にROIを縮小する場合も、テンプレートを収められない設定は拒否されます。
 
 ## 性能確認
 
