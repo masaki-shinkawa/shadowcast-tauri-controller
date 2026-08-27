@@ -68,6 +68,7 @@ export default function App() {
 
   const handleStart = async () => {
     setBusy(true);
+    setPreviewMetrics(EMPTY_PREVIEW_METRICS);
     setStatus((current) => ({ ...current, state: "starting", error: null }));
     try {
       setStatus(await startCapture(broadcastFrame));

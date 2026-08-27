@@ -41,6 +41,7 @@ npm run tauri dev
 npm run check
 npm test
 npm run build
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\PerformanceMetrics.Tests.ps1
 cargo test --manifest-path src-tauri/Cargo.toml
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 ```

@@ -1,10 +1,5 @@
 import { useEffect, useRef } from "react";
-import {
-  EMPTY_PREVIEW_METRICS,
-  type FrameBytes,
-  type FrameListener,
-  type PreviewMetrics,
-} from "../lib/tauri";
+import type { FrameBytes, FrameListener, PreviewMetrics } from "../lib/tauri";
 
 interface VideoPreviewProps {
   subscribe: (listener: FrameListener) => () => void;
@@ -23,7 +18,6 @@ export function VideoPreview({ subscribe, running, onMetrics }: VideoPreviewProp
   useEffect(() => {
     if (!running) {
       imageRef.current?.removeAttribute("src");
-      onMetrics(EMPTY_PREVIEW_METRICS);
     }
 
     let latestFrame: PendingFrame | null = null;

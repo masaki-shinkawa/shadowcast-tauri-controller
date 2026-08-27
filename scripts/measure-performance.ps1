@@ -14,6 +14,9 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+Import-Module (Join-Path $PSScriptRoot "PerformanceMetrics.psm1") -Force
+Assert-MeasurementWindow -DurationMinutes $DurationMinutes -IntervalSeconds $IntervalSeconds
+
 if ($IncludeUiTelemetry) {
     Add-Type -AssemblyName UIAutomationClient
 }
@@ -156,7 +159,7 @@ function Get-MetricStats {
 $startedAt = Get-Date
 $deadline = $startedAt.AddMinutes($DurationMinutes)
 $samples = [System.Collections.Generic.List[object]]::new()
-$previousCpuSeconds = $null
+$previousCpuSecondsById = $null
 $previousSampleAt = $null
 
 Write-Host "Measuring process $($rootProcess.Id) and its WebView2 children for $DurationMinutes minute(s)."
@@ -171,7 +174,12 @@ while ((Get-Date) -lt $deadline) {
         throw "The Tauri process exited before the measurement completed."
     }
 
-    $cpuSeconds = ($processes | Measure-Object CPU -Sum).Sum
+    $currentCpuSecondsById = @{}
+    foreach ($process in $processes) {
+        if ($null -ne $process.CPU) {
+            $currentCpuSecondsById[$process.Id] = [double]$process.CPU
+        }
+    }
     $workingSetBytes = ($processes | Measure-Object WorkingSet64 -Sum).Sum
     $privateBytes = ($processes | Measure-Object PrivateMemorySize64 -Sum).Sum
     $cpuPercent = 0.0
@@ -203,11 +211,12 @@ while ((Get-Date) -lt $deadline) {
         $channelSendMs = Convert-MetricValue (Get-TextAfterLabel $automationNames "SEND CALL") "ms"
     }
 
-    if ($null -ne $previousCpuSeconds -and $null -ne $previousSampleAt) {
+    if ($null -ne $previousCpuSecondsById -and $null -ne $previousSampleAt) {
         $sampleSeconds = ($sampledAt - $previousSampleAt).TotalSeconds
-        if ($sampleSeconds -gt 0) {
-            $cpuPercent = (($cpuSeconds - $previousCpuSeconds) / $sampleSeconds) * 100
-        }
+        $cpuPercent = Get-CpuPercentOneCore `
+            -CurrentCpuSecondsById $currentCpuSecondsById `
+            -PreviousCpuSecondsById $previousCpuSecondsById `
+            -ElapsedSeconds $sampleSeconds
     }
 
     $samples.Add([pscustomobject]@{
@@ -229,7 +238,7 @@ while ((Get-Date) -lt $deadline) {
         average_channel_send_ms = $channelSendMs
     })
 
-    $previousCpuSeconds = $cpuSeconds
+    $previousCpuSecondsById = $currentCpuSecondsById
     $previousSampleAt = $sampledAt
     $remainingMilliseconds = [Math]::Round(
         [Math]::Max(0, ($IntervalSeconds - ((Get-Date) - $sampledAt).TotalSeconds) * 1000)
@@ -238,6 +247,8 @@ while ((Get-Date) -lt $deadline) {
         Start-Sleep -Milliseconds $remainingMilliseconds
     }
 }
+
+Assert-MeasuredSampleCount -SampleCount $samples.Count
 
 $timestamp = $startedAt.ToString("yyyyMMdd-HHmmss")
 $csvPath = Join-Path $resolvedOutputDirectory "resources-$timestamp.csv"
