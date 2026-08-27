@@ -18,6 +18,7 @@ export function VideoPreview({ subscribe, running, onMetrics }: VideoPreviewProp
   useEffect(() => {
     if (!running) {
       imageRef.current?.removeAttribute("src");
+      return;
     }
 
     let latestFrame: PendingFrame | null = null;
