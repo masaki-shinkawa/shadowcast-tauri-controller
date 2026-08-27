@@ -4,9 +4,13 @@ import { StatusPanel } from "./components/StatusPanel";
 import { VideoPreview } from "./components/VideoPreview";
 import {
   type CaptureStatus,
+  EMPTY_PREVIEW_METRICS,
   type FrameBytes,
   type FrameListener,
   getCaptureStatus,
+  type PreviewMetrics,
+  reportPreviewMetrics,
+  setTelemetryEnabled,
   startCapture,
   stopCapture,
 } from "./lib/tauri";
@@ -20,12 +24,19 @@ const INITIAL_STATUS: CaptureStatus = {
   measuredFps: 0,
   frameFormat: null,
   frameCount: 0,
+  jpegBytes: 0,
+  averageJpegBytes: 0,
+  channelMbps: 0,
+  averageChannelSendMs: 0,
+  telemetryEnabled: false,
   error: null,
 };
 
 export default function App() {
   const [status, setStatus] = useState<CaptureStatus>(INITIAL_STATUS);
+  const [previewMetrics, setPreviewMetrics] = useState<PreviewMetrics>(EMPTY_PREVIEW_METRICS);
   const [busy, setBusy] = useState(false);
+  const [telemetryBusy, setTelemetryBusy] = useState(false);
   const frameListeners = useRef(new Set<FrameListener>());
 
   const subscribe = useCallback((listener: FrameListener) => {
@@ -35,6 +46,13 @@ export default function App() {
 
   const broadcastFrame = useCallback((frame: FrameBytes) => {
     for (const listener of frameListeners.current) listener(frame);
+  }, []);
+
+  const handlePreviewMetrics = useCallback((metrics: PreviewMetrics) => {
+    setPreviewMetrics(metrics);
+    if (metrics.receivedFps > 0) {
+      void reportPreviewMetrics(metrics).catch(() => undefined);
+    }
   }, []);
 
   const refreshStatus = useCallback(async () => {
@@ -53,6 +71,7 @@ export default function App() {
 
   const handleStart = async () => {
     setBusy(true);
+    setPreviewMetrics(EMPTY_PREVIEW_METRICS);
     setStatus((current) => ({ ...current, state: "starting", error: null }));
     try {
       setStatus(await startCapture(broadcastFrame));
@@ -71,6 +90,18 @@ export default function App() {
       setStatus((current) => ({ ...current, state: "error", error: String(error) }));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const handleTelemetryToggle = async () => {
+    setTelemetryBusy(true);
+    try {
+      setStatus(await setTelemetryEnabled(!status.telemetryEnabled));
+      setPreviewMetrics(EMPTY_PREVIEW_METRICS);
+    } catch (error) {
+      setStatus((current) => ({ ...current, error: String(error) }));
+    } finally {
+      setTelemetryBusy(false);
     }
   };
 
@@ -95,8 +126,18 @@ export default function App() {
       </header>
 
       <div className="workspace">
-        <VideoPreview subscribe={subscribe} running={running} />
-        <StatusPanel status={status} />
+        <VideoPreview
+          subscribe={subscribe}
+          running={running}
+          telemetryEnabled={status.telemetryEnabled}
+          onMetrics={handlePreviewMetrics}
+        />
+        <StatusPanel
+          status={status}
+          previewMetrics={previewMetrics}
+          telemetryBusy={telemetryBusy}
+          onTelemetryToggle={() => void handleTelemetryToggle()}
+        />
       </div>
 
       <footer className="app-footer">

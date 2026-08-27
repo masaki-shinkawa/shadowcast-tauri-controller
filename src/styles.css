@@ -275,6 +275,51 @@ h2 {
   border-bottom: 1px solid var(--line);
 }
 
+.status-heading-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.telemetry-toggle {
+  padding: 6px 9px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  color: #949da8;
+  background: rgba(5, 7, 9, 0.62);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+
+.telemetry-toggle span {
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  background: #59616b;
+}
+
+.telemetry-toggle--on {
+  border-color: rgba(184, 255, 56, 0.35);
+  color: var(--green);
+  background: rgba(184, 255, 56, 0.07);
+}
+
+.telemetry-toggle--on span {
+  background: var(--green);
+  box-shadow: 0 0 9px rgba(184, 255, 56, 0.45);
+}
+
+.telemetry-toggle:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
 .status-pill {
   padding: 6px 8px;
   display: flex;
@@ -343,6 +388,27 @@ h2 {
 
 .telemetry-row dd.accent-value {
   color: var(--green);
+}
+
+.telemetry-disabled {
+  margin-top: 18px;
+  padding: 16px;
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+  border-radius: 9px;
+  background: rgba(5, 7, 9, 0.34);
+}
+
+.telemetry-disabled strong {
+  display: block;
+  color: #b6bec7;
+  font-size: 11px;
+}
+
+.telemetry-disabled p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.5;
 }
 
 .pipeline-note {

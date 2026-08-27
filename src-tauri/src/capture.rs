@@ -1,41 +1,22 @@
+mod device;
+mod worker;
+
 use std::{
-    cmp::Ordering,
-    io::Cursor,
     sync::{
         atomic::{AtomicBool, Ordering as AtomicOrdering},
         mpsc, Arc, Mutex, MutexGuard,
     },
     thread::{self, JoinHandle},
-    time::{Duration, Instant},
 };
 
-use image::codecs::jpeg::JpegEncoder;
-use nokhwa::{
-    pixel_format::RgbFormat,
-    query,
-    utils::{
-        ApiBackend, CameraFormat, CameraInfo, FrameFormat, RequestedFormat, RequestedFormatType,
-    },
-    Camera,
-};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{
     ipc::{Channel, Response},
     State,
 };
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
-const TARGET_WIDTH: u32 = 1280;
-const TARGET_HEIGHT: u32 = 720;
-const TARGET_FPS: u32 = 60;
-const ACCEPTED_FORMATS: &[FrameFormat] = &[
-    FrameFormat::MJPEG,
-    FrameFormat::YUYV,
-    FrameFormat::NV12,
-    FrameFormat::RAWRGB,
-    FrameFormat::RAWBGR,
-    FrameFormat::GRAY,
-];
+use self::worker::run_capture;
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -48,6 +29,11 @@ pub struct CaptureStatus {
     measured_fps: f64,
     frame_format: Option<String>,
     frame_count: u64,
+    jpeg_bytes: u64,
+    average_jpeg_bytes: f64,
+    channel_mbps: f64,
+    average_channel_send_ms: f64,
+    telemetry_enabled: bool,
     error: Option<String>,
 }
 
@@ -71,6 +57,11 @@ impl Default for CaptureStatus {
             measured_fps: 0.0,
             frame_format: None,
             frame_count: 0,
+            jpeg_bytes: 0,
+            average_jpeg_bytes: 0.0,
+            channel_mbps: 0.0,
+            average_channel_send_ms: 0.0,
+            telemetry_enabled: false,
             error: None,
         }
     }
@@ -84,6 +75,17 @@ struct ActiveCapture {
 pub struct CaptureManager {
     active: Mutex<Option<ActiveCapture>>,
     status: Arc<Mutex<CaptureStatus>>,
+    telemetry_enabled: Arc<AtomicBool>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewMetrics {
+    received_fps: f64,
+    rendered_fps: f64,
+    receive_mbps: f64,
+    receive_to_draw_ms: f64,
+    dropped_frames: u64,
 }
 
 impl Default for CaptureManager {
@@ -91,6 +93,7 @@ impl Default for CaptureManager {
         Self {
             active: Mutex::new(None),
             status: Arc::new(Mutex::new(CaptureStatus::default())),
+            telemetry_enabled: Arc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -109,9 +112,11 @@ impl CaptureManager {
             let _ = finished.thread.join();
         }
 
+        let telemetry_enabled = self.telemetry_enabled.load(AtomicOrdering::Acquire);
         update_status(&self.status, |status| {
             *status = CaptureStatus {
                 state: CaptureState::Starting,
+                telemetry_enabled,
                 ..CaptureStatus::default()
             };
         });
@@ -119,11 +124,20 @@ impl CaptureManager {
         let stop = Arc::new(AtomicBool::new(false));
         let thread_stop = Arc::clone(&stop);
         let thread_status = Arc::clone(&self.status);
+        let thread_telemetry_enabled = Arc::clone(&self.telemetry_enabled);
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
 
         let capture_thread = thread::Builder::new()
             .name("shadowcast-capture".to_owned())
-            .spawn(move || run_capture(on_frame, thread_stop, thread_status, ready_tx))
+            .spawn(move || {
+                run_capture(
+                    on_frame,
+                    thread_stop,
+                    thread_status,
+                    thread_telemetry_enabled,
+                    ready_tx,
+                );
+            })
             .map_err(|error| format!("Failed to spawn capture thread: {error}"))?;
 
         match ready_rx.recv() {
@@ -171,6 +185,20 @@ impl CaptureManager {
     fn status(&self) -> CaptureStatus {
         lock(&self.status).clone()
     }
+
+    fn set_telemetry_enabled(&self, enabled: bool) -> CaptureStatus {
+        self.telemetry_enabled
+            .store(enabled, AtomicOrdering::Release);
+        update_status(&self.status, |status| {
+            status.telemetry_enabled = enabled;
+            reset_telemetry_metrics(status);
+        });
+        lock(&self.status).clone()
+    }
+
+    fn telemetry_enabled(&self) -> bool {
+        self.telemetry_enabled.load(AtomicOrdering::Acquire)
+    }
 }
 
 impl Drop for CaptureManager {
@@ -202,258 +230,32 @@ pub fn get_capture_status(manager: State<'_, CaptureManager>) -> CaptureStatus {
     manager.status()
 }
 
-fn run_capture(
-    on_frame: Channel<Response>,
-    stop: Arc<AtomicBool>,
-    status: Arc<Mutex<CaptureStatus>>,
-    ready: mpsc::SyncSender<Result<CaptureStatus, String>>,
-) {
-    let mut ready = Some(ready);
-    let result = capture_loop(&on_frame, &stop, &status, &mut ready);
-
-    if let Err(message) = result {
-        error!(error = %message, "ShadowCast capture failed");
-        update_status(&status, |capture_status| {
-            capture_status.state = CaptureState::Error;
-            capture_status.error = Some(message.clone());
-            capture_status.measured_fps = 0.0;
-        });
-        if let Some(ready) = ready.take() {
-            let _ = ready.send(Err(message));
-        }
-    } else {
-        info!("ShadowCast capture stopped");
-        update_status(&status, |capture_status| {
-            capture_status.state = CaptureState::Stopped;
-            capture_status.measured_fps = 0.0;
-        });
-    }
+#[tauri::command]
+pub fn set_telemetry_enabled(manager: State<'_, CaptureManager>, enabled: bool) -> CaptureStatus {
+    manager.set_telemetry_enabled(enabled)
 }
 
-fn capture_loop(
-    on_frame: &Channel<Response>,
-    stop: &AtomicBool,
-    status: &Arc<Mutex<CaptureStatus>>,
-    ready: &mut Option<mpsc::SyncSender<Result<CaptureStatus, String>>>,
-) -> Result<(), String> {
-    let devices = query(ApiBackend::MediaFoundation)
-        .map_err(|error| format!("Failed to enumerate Windows camera devices: {error}"))?;
-
-    for device in &devices {
-        info!(
-            name = %device.human_name(),
-            description = %device.description(),
-            index = %device.index().as_string(),
-            "camera device found"
-        );
+#[tauri::command]
+pub fn report_preview_metrics(manager: State<'_, CaptureManager>, metrics: PreviewMetrics) {
+    if !manager.telemetry_enabled() {
+        return;
     }
-
-    let shadowcast = devices
-        .iter()
-        .find(|device| is_shadowcast(device))
-        .cloned()
-        .ok_or_else(|| {
-            let available = devices
-                .iter()
-                .map(CameraInfo::human_name)
-                .collect::<Vec<_>>()
-                .join(", ");
-            if available.is_empty() {
-                "ShadowCast was not found. No Windows camera devices are available.".to_owned()
-            } else {
-                format!("ShadowCast was not found. Available cameras: {available}")
-            }
-        })?;
-
-    info!(device = %shadowcast.human_name(), "ShadowCast detected");
-
-    let target =
-        CameraFormat::new_from(TARGET_WIDTH, TARGET_HEIGHT, FrameFormat::MJPEG, TARGET_FPS);
-    let requested =
-        RequestedFormat::with_formats(RequestedFormatType::Closest(target), ACCEPTED_FORMATS);
-    let mut camera = Camera::with_backend(
-        shadowcast.index().clone(),
-        requested,
-        ApiBackend::MediaFoundation,
-    )
-    .map_err(|error| format!("Failed to open ShadowCast through Media Foundation: {error}"))?;
-
-    let formats = camera
-        .compatible_camera_formats()
-        .map_err(|error| format!("Failed to enumerate ShadowCast formats: {error}"))?;
-    if formats.is_empty() {
-        return Err("ShadowCast reported no compatible capture formats".to_owned());
-    }
-
-    for format in &formats {
-        info!(
-            width = format.width(),
-            height = format.height(),
-            fps = format.frame_rate(),
-            frame_format = ?format.format(),
-            "ShadowCast format supported"
-        );
-    }
-
-    let requested_format = select_preferred_format(&formats)
-        .ok_or_else(|| "No usable ShadowCast capture format was found".to_owned())?;
-    let exact = RequestedFormat::with_formats(
-        RequestedFormatType::Exact(requested_format),
-        ACCEPTED_FORMATS,
-    );
-    camera
-        .set_camera_requset(exact)
-        .map_err(|error| format!("Failed to select {requested_format}: {error}"))?;
-    camera
-        .open_stream()
-        .map_err(|error| format!("Failed to start the ShadowCast stream: {error}"))?;
-
-    let stream_format = camera.camera_format();
-    let device_name = shadowcast.human_name();
     info!(
-        device = %device_name,
-        width = stream_format.width(),
-        height = stream_format.height(),
-        requested_fps = requested_format.frame_rate(),
-        reported_stream_fps = stream_format.frame_rate(),
-        frame_format = ?stream_format.format(),
-        passthrough = stream_format.format() == FrameFormat::MJPEG,
-        "ShadowCast capture started"
+        received_fps = metrics.received_fps,
+        rendered_fps = metrics.rendered_fps,
+        receive_mbps = metrics.receive_mbps,
+        receive_to_draw_ms = metrics.receive_to_draw_ms,
+        dropped_frames = metrics.dropped_frames,
+        "preview performance"
     );
-
-    update_status(status, |capture_status| {
-        *capture_status = running_status(device_name, requested_format, stream_format);
-    });
-
-    if let Some(ready) = ready.take() {
-        let _ = ready.send(Ok(lock(status).clone()));
-    }
-
-    let mut total_frames = 0_u64;
-    let mut interval_frames = 0_u64;
-    let mut interval_started = Instant::now();
-
-    while !stop.load(AtomicOrdering::Acquire) {
-        let frame = camera
-            .frame()
-            .map_err(|error| format!("Failed to read a ShadowCast frame: {error}"))?;
-        let jpeg = if frame.source_frame_format() == FrameFormat::MJPEG {
-            frame.buffer().to_vec()
-        } else {
-            warn!(
-                frame_format = ?frame.source_frame_format(),
-                "non-MJPEG frame requires RGB decode and JPEG encode"
-            );
-            let rgb = frame.decode_image::<RgbFormat>().map_err(|error| {
-                format!(
-                    "Failed to decode {:?} frame: {error}",
-                    frame.source_frame_format()
-                )
-            })?;
-            let mut jpeg = Cursor::new(Vec::new());
-            JpegEncoder::new_with_quality(&mut jpeg, 88)
-                .encode_image(&rgb)
-                .map_err(|error| format!("Failed to encode fallback JPEG frame: {error}"))?;
-            jpeg.into_inner()
-        };
-
-        if on_frame.send(Response::new(jpeg)).is_err() {
-            info!("frontend frame channel closed");
-            break;
-        }
-
-        total_frames += 1;
-        interval_frames += 1;
-        let elapsed = interval_started.elapsed();
-        if elapsed >= Duration::from_secs(1) {
-            let measured_fps = interval_frames as f64 / elapsed.as_secs_f64();
-            update_status(status, |capture_status| {
-                capture_status.frame_count = total_frames;
-                capture_status.measured_fps = measured_fps;
-            });
-            interval_started = Instant::now();
-            interval_frames = 0;
-        }
-    }
-
-    if let Err(error) = camera.stop_stream() {
-        warn!(%error, "failed to stop ShadowCast stream cleanly");
-    }
-    update_status(status, |capture_status| {
-        capture_status.frame_count = total_frames;
-    });
-    Ok(())
 }
 
-fn is_shadowcast(device: &CameraInfo) -> bool {
-    let identity = format!(
-        "{} {} {}",
-        device.human_name(),
-        device.description(),
-        device.misc()
-    )
-    .to_lowercase();
-    identity.contains("shadowcast") || identity.contains("genki")
-}
-
-fn running_status(
-    device_name: String,
-    requested_format: CameraFormat,
-    stream_format: CameraFormat,
-) -> CaptureStatus {
-    CaptureStatus {
-        state: CaptureState::Running,
-        device_name: Some(device_name),
-        width: Some(stream_format.width()),
-        height: Some(stream_format.height()),
-        // nokhwa-bindings-windows 0.4.6 reads the denominator of the packed
-        // MF_MT_FRAME_RATE ratio when refreshing the active stream format. For
-        // a 60/1 stream that makes stream_format.frame_rate() return 1. The
-        // target is the format selected from the enumerated native formats;
-        // actual throughput is tracked independently in measured_fps.
-        target_fps: Some(requested_format.frame_rate()),
-        measured_fps: 0.0,
-        frame_format: Some(format_name(stream_format.format()).to_owned()),
-        frame_count: 0,
-        error: None,
-    }
-}
-
-fn select_preferred_format(formats: &[CameraFormat]) -> Option<CameraFormat> {
-    formats.iter().copied().min_by(compare_formats)
-}
-
-fn compare_formats(left: &CameraFormat, right: &CameraFormat) -> Ordering {
-    format_score(left).cmp(&format_score(right))
-}
-
-fn format_score(format: &CameraFormat) -> (u8, u8, u32, u64, std::cmp::Reverse<u32>) {
-    let is_mjpeg = format.format() == FrameFormat::MJPEG;
-    let is_target_resolution = format.width() == TARGET_WIDTH && format.height() == TARGET_HEIGHT;
-    let format_penalty = if is_mjpeg { 0 } else { 1 };
-    let resolution_penalty = if is_target_resolution { 0 } else { 1 };
-    let fps_distance = format.frame_rate().abs_diff(TARGET_FPS);
-    let pixel_distance = (u64::from(format.width()) * u64::from(format.height()))
-        .abs_diff(u64::from(TARGET_WIDTH) * u64::from(TARGET_HEIGHT));
-
-    (
-        format_penalty,
-        resolution_penalty,
-        fps_distance,
-        pixel_distance,
-        std::cmp::Reverse(format.frame_rate()),
-    )
-}
-
-fn format_name(format: FrameFormat) -> &'static str {
-    match format {
-        FrameFormat::MJPEG => "MJPEG",
-        FrameFormat::YUYV => "YUYV",
-        FrameFormat::NV12 => "NV12",
-        FrameFormat::GRAY => "GRAY",
-        FrameFormat::RAWRGB => "RGB",
-        FrameFormat::RAWBGR => "BGR",
-    }
+fn reset_telemetry_metrics(status: &mut CaptureStatus) {
+    status.measured_fps = 0.0;
+    status.jpeg_bytes = 0;
+    status.average_jpeg_bytes = 0.0;
+    status.channel_mbps = 0.0;
+    status.average_channel_send_ms = 0.0;
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -471,39 +273,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn exact_target_mjpeg_wins() {
-        let formats = [
-            CameraFormat::new_from(1920, 1080, FrameFormat::MJPEG, 60),
-            CameraFormat::new_from(1280, 720, FrameFormat::YUYV, 60),
-            CameraFormat::new_from(1280, 720, FrameFormat::MJPEG, 60),
-        ];
+    fn telemetry_is_disabled_by_default_and_resets_detailed_metrics() {
+        let manager = CaptureManager::default();
+        assert!(!manager.status().telemetry_enabled);
 
-        assert_eq!(select_preferred_format(&formats), Some(formats[2]));
-    }
+        update_status(&manager.status, |status| {
+            status.measured_fps = 60.0;
+            status.jpeg_bytes = 1024;
+            status.average_jpeg_bytes = 512.0;
+            status.channel_mbps = 8.0;
+            status.average_channel_send_ms = 0.1;
+        });
 
-    #[test]
-    fn target_resolution_mjpeg_beats_other_mjpeg_resolutions() {
-        let formats = [
-            CameraFormat::new_from(1920, 1080, FrameFormat::MJPEG, 60),
-            CameraFormat::new_from(1280, 720, FrameFormat::MJPEG, 30),
-        ];
-
-        assert_eq!(select_preferred_format(&formats), Some(formats[1]));
-    }
-
-    #[test]
-    fn target_fps_uses_requested_format_when_stream_reports_ratio_denominator() {
-        let requested_format = CameraFormat::new_from(1280, 720, FrameFormat::MJPEG, TARGET_FPS);
-        // Media Foundation stores 60 FPS as 60/1. nokhwa-bindings-windows
-        // currently reports the denominator after refreshing the stream.
-        let stream_format = CameraFormat::new_from(1280, 720, FrameFormat::MJPEG, 1);
-
-        let status = running_status("ShadowCast".to_owned(), requested_format, stream_format);
-
-        assert_eq!(status.target_fps, Some(60));
+        let status = manager.set_telemetry_enabled(true);
+        assert!(status.telemetry_enabled);
         assert_eq!(status.measured_fps, 0.0);
-        assert_eq!(status.width, Some(1280));
-        assert_eq!(status.height, Some(720));
-        assert_eq!(status.frame_format.as_deref(), Some("MJPEG"));
+        assert_eq!(status.jpeg_bytes, 0);
+        assert_eq!(status.average_jpeg_bytes, 0.0);
+        assert_eq!(status.channel_mbps, 0.0);
+        assert_eq!(status.average_channel_send_ms, 0.0);
     }
 }
