@@ -295,41 +295,34 @@ fn capture_loop(
         );
     }
 
-    let selected = select_preferred_format(&formats)
+    let requested_format = select_preferred_format(&formats)
         .ok_or_else(|| "No usable ShadowCast capture format was found".to_owned())?;
-    let exact =
-        RequestedFormat::with_formats(RequestedFormatType::Exact(selected), ACCEPTED_FORMATS);
+    let exact = RequestedFormat::with_formats(
+        RequestedFormatType::Exact(requested_format),
+        ACCEPTED_FORMATS,
+    );
     camera
         .set_camera_requset(exact)
-        .map_err(|error| format!("Failed to select {selected}: {error}"))?;
+        .map_err(|error| format!("Failed to select {requested_format}: {error}"))?;
     camera
         .open_stream()
         .map_err(|error| format!("Failed to start the ShadowCast stream: {error}"))?;
 
-    let selected = camera.camera_format();
+    let stream_format = camera.camera_format();
     let device_name = shadowcast.human_name();
     info!(
         device = %device_name,
-        width = selected.width(),
-        height = selected.height(),
-        fps = selected.frame_rate(),
-        frame_format = ?selected.format(),
-        passthrough = selected.format() == FrameFormat::MJPEG,
+        width = stream_format.width(),
+        height = stream_format.height(),
+        requested_fps = requested_format.frame_rate(),
+        reported_stream_fps = stream_format.frame_rate(),
+        frame_format = ?stream_format.format(),
+        passthrough = stream_format.format() == FrameFormat::MJPEG,
         "ShadowCast capture started"
     );
 
     update_status(status, |capture_status| {
-        *capture_status = CaptureStatus {
-            state: CaptureState::Running,
-            device_name: Some(device_name),
-            width: Some(selected.width()),
-            height: Some(selected.height()),
-            target_fps: Some(selected.frame_rate()),
-            measured_fps: 0.0,
-            frame_format: Some(format_name(selected.format()).to_owned()),
-            frame_count: 0,
-            error: None,
-        };
+        *capture_status = running_status(device_name, requested_format, stream_format);
     });
 
     if let Some(ready) = ready.take() {
@@ -403,6 +396,29 @@ fn is_shadowcast(device: &CameraInfo) -> bool {
     identity.contains("shadowcast") || identity.contains("genki")
 }
 
+fn running_status(
+    device_name: String,
+    requested_format: CameraFormat,
+    stream_format: CameraFormat,
+) -> CaptureStatus {
+    CaptureStatus {
+        state: CaptureState::Running,
+        device_name: Some(device_name),
+        width: Some(stream_format.width()),
+        height: Some(stream_format.height()),
+        // nokhwa-bindings-windows 0.4.6 reads the denominator of the packed
+        // MF_MT_FRAME_RATE ratio when refreshing the active stream format. For
+        // a 60/1 stream that makes stream_format.frame_rate() return 1. The
+        // target is the format selected from the enumerated native formats;
+        // actual throughput is tracked independently in measured_fps.
+        target_fps: Some(requested_format.frame_rate()),
+        measured_fps: 0.0,
+        frame_format: Some(format_name(stream_format.format()).to_owned()),
+        frame_count: 0,
+        error: None,
+    }
+}
+
 fn select_preferred_format(formats: &[CameraFormat]) -> Option<CameraFormat> {
     formats.iter().copied().min_by(compare_formats)
 }
@@ -473,5 +489,21 @@ mod tests {
         ];
 
         assert_eq!(select_preferred_format(&formats), Some(formats[1]));
+    }
+
+    #[test]
+    fn target_fps_uses_requested_format_when_stream_reports_ratio_denominator() {
+        let requested_format = CameraFormat::new_from(1280, 720, FrameFormat::MJPEG, TARGET_FPS);
+        // Media Foundation stores 60 FPS as 60/1. nokhwa-bindings-windows
+        // currently reports the denominator after refreshing the stream.
+        let stream_format = CameraFormat::new_from(1280, 720, FrameFormat::MJPEG, 1);
+
+        let status = running_status("ShadowCast".to_owned(), requested_format, stream_format);
+
+        assert_eq!(status.target_fps, Some(60));
+        assert_eq!(status.measured_fps, 0.0);
+        assert_eq!(status.width, Some(1280));
+        assert_eq!(status.height, Some(720));
+        assert_eq!(status.frame_format.as_deref(), Some("MJPEG"));
     }
 }
