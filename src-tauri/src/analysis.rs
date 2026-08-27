@@ -17,6 +17,7 @@ const MAX_ANALYSIS_FPS: u32 = 60;
 const MAX_TEMPLATE_DIMENSION: u32 = 64;
 const TEMPLATE_COMPARISON_BUDGET: u64 = 4_000_000;
 const MAX_STATE_TRANSITIONS: usize = 50;
+const STATE_WATCHDOG_INTERVAL: Duration = Duration::from_millis(250);
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -183,6 +184,12 @@ struct LatestFrameQueue {
     ready: Condvar,
 }
 
+enum QueueTake {
+    Frame(AnalysisFrame),
+    Idle,
+    Closed,
+}
+
 impl LatestFrameQueue {
     fn submit(&self, frame: AnalysisFrame) -> Option<bool> {
         let mut state = lock(&self.state);
@@ -194,24 +201,33 @@ impl LatestFrameQueue {
         Some(replaced)
     }
 
-    fn take_after(&self, deadline: Instant) -> Option<AnalysisFrame> {
+    fn take_after(&self, deadline: Instant, idle_wait: Duration) -> QueueTake {
         let mut state = lock(&self.state);
         loop {
             if state.closed {
-                return None;
+                return QueueTake::Closed;
             }
 
             if state.latest.is_none() {
-                state = self
+                let (next_state, wait_result) = self
                     .ready
-                    .wait(state)
+                    .wait_timeout(state, idle_wait)
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
+                state = next_state;
+                if wait_result.timed_out() && state.latest.is_none() {
+                    return QueueTake::Idle;
+                }
                 continue;
             }
 
             let now = Instant::now();
             if now >= deadline {
-                return state.latest.take();
+                return QueueTake::Frame(
+                    state
+                        .latest
+                        .take()
+                        .expect("latest frame was checked before taking"),
+                );
             }
 
             let wait = deadline.saturating_duration_since(now);
@@ -451,8 +467,29 @@ fn run_analysis_worker(
     let mut total_analysis_time = Duration::ZERO;
     let detector_started = Instant::now();
     let mut state_detector = GameStateDetector::default();
+    let mut last_frame_number = 0;
 
-    while let Some(frame) = queue.take_after(next_allowed) {
+    loop {
+        let frame = match queue.take_after(next_allowed, STATE_WATCHDOG_INTERVAL) {
+            QueueTake::Frame(frame) => frame,
+            QueueTake::Idle => {
+                let transition = state_detector.advance_time(
+                    last_frame_number,
+                    unix_time_ms(),
+                    detector_started.elapsed().as_millis() as u64,
+                );
+                log_state_transition(transition.as_ref());
+                if transition.is_some() {
+                    update_status(&status, |analysis_status| {
+                        analysis_status.game_state = state_detector.snapshot();
+                        record_state_transition(analysis_status, transition);
+                    });
+                }
+                continue;
+            }
+            QueueTake::Closed => break,
+        };
+        last_frame_number = frame.number;
         let (current_config, current_template) = {
             let current_config = lock(&config);
             let current_template = lock(&template);
@@ -485,16 +522,7 @@ fn run_analysis_worker(
                     unix_time_ms(),
                     detector_started.elapsed().as_millis() as u64,
                 );
-                if let Some(event) = &transition {
-                    info!(
-                        from = ?event.from,
-                        to = ?event.to,
-                        confidence = event.confidence,
-                        frame_number = event.frame_number,
-                        reason = %event.reason,
-                        "game state transitioned"
-                    );
-                }
+                log_state_transition(transition.as_ref());
                 let elapsed = started.elapsed();
                 result.analysis_ms = elapsed.as_secs_f64() * 1_000.0;
                 total_analysis_time += elapsed;
@@ -520,8 +548,16 @@ fn run_analysis_worker(
             }
             Err(message) => {
                 warn!(error = %message, frame_number = frame.number, "frame analysis failed");
+                let transition = state_detector.observe_unavailable(
+                    frame.number,
+                    unix_time_ms(),
+                    detector_started.elapsed().as_millis() as u64,
+                );
+                log_state_transition(transition.as_ref());
                 update_status(&status, |analysis_status| {
                     analysis_status.failed_frames += 1;
+                    analysis_status.game_state = state_detector.snapshot();
+                    record_state_transition(analysis_status, transition);
                     analysis_status.error = Some(message);
                 });
             }
@@ -536,6 +572,7 @@ fn run_analysis_worker(
             analysis_status.state = AnalysisState::Stopped;
             analysis_status.measured_fps = 0.0;
         }
+        analysis_status.game_state = GameStateSnapshot::default();
     });
     info!("analysis worker stopped");
 }
@@ -561,12 +598,7 @@ fn record_analysis_success(
         }
         analysis_status.last_result = Some(result);
         analysis_status.game_state = game_state;
-        if let Some(event) = transition {
-            analysis_status.state_transitions.push(event);
-            if analysis_status.state_transitions.len() > MAX_STATE_TRANSITIONS {
-                analysis_status.state_transitions.remove(0);
-            }
-        }
+        record_state_transition(analysis_status, transition);
         analysis_status.error = None;
     });
 }
@@ -780,6 +812,28 @@ fn update_status(status: &Arc<Mutex<AnalysisStatus>>, update: impl FnOnce(&mut A
     update(&mut lock(status));
 }
 
+fn log_state_transition(transition: Option<&GameStateTransition>) {
+    if let Some(event) = transition {
+        info!(
+            from = ?event.from,
+            to = ?event.to,
+            confidence = event.confidence,
+            frame_number = event.frame_number,
+            reason = %event.reason,
+            "game state transitioned"
+        );
+    }
+}
+
+fn record_state_transition(status: &mut AnalysisStatus, transition: Option<GameStateTransition>) {
+    if let Some(event) = transition {
+        status.state_transitions.push(event);
+        if status.state_transitions.len() > MAX_STATE_TRANSITIONS {
+            status.state_transitions.remove(0);
+        }
+    }
+}
+
 fn unix_time_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -900,8 +954,51 @@ mod tests {
         assert_eq!(queue.submit(frame(1)), Some(false));
         assert_eq!(queue.submit(frame(2)), Some(true));
         assert_eq!(
-            queue.take_after(Instant::now()).map(|item| item.number),
-            Some(2)
+            match queue.take_after(Instant::now(), Duration::ZERO) {
+                QueueTake::Frame(item) => Some(item.number),
+                QueueTake::Idle | QueueTake::Closed => None,
+            },
+            Some(2),
+        );
+    }
+
+    #[test]
+    fn latest_frame_queue_reports_idle_without_closing() {
+        let queue = LatestFrameQueue::default();
+
+        assert!(matches!(
+            queue.take_after(Instant::now(), Duration::ZERO),
+            QueueTake::Idle
+        ));
+        assert_eq!(
+            queue.submit(AnalysisFrame {
+                number: 1,
+                jpeg: vec![],
+                submitted_at: Instant::now(),
+            }),
+            Some(false)
+        );
+        assert!(matches!(
+            queue.take_after(Instant::now(), Duration::ZERO),
+            QueueTake::Frame(frame) if frame.number == 1
+        ));
+    }
+
+    #[test]
+    fn stopping_analysis_clears_the_current_game_state() {
+        let manager = AnalysisManager::default();
+        let _input = manager.start().expect("analysis worker should start");
+        update_status(&manager.status, |status| {
+            status.game_state.state = crate::game_state::GameState::Gameplay;
+            status.game_state.confidence = 0.8;
+        });
+
+        manager.stop();
+
+        assert_eq!(
+            manager.status().game_state,
+            GameStateSnapshot::default(),
+            "a stopped capture must not expose an actionable game state"
         );
     }
 
