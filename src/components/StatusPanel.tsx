@@ -1,8 +1,9 @@
-import type { CaptureStatus, PreviewMetrics } from "../lib/tauri";
+import type { AnalysisStatus, CaptureStatus, PreviewMetrics } from "../lib/tauri";
 
 interface StatusPanelProps {
   status: CaptureStatus;
   previewMetrics: PreviewMetrics;
+  analysisStatus: AnalysisStatus;
   telemetryBusy: boolean;
   onTelemetryToggle: () => void;
 }
@@ -18,10 +19,12 @@ function formatKib(bytes: number) {
 export function StatusPanel({
   status,
   previewMetrics,
+  analysisStatus,
   telemetryBusy,
   onTelemetryToggle,
 }: StatusPanelProps) {
   const isRunning = status.state === "running";
+  const result = analysisStatus.lastResult;
 
   return (
     <aside className="status-panel">
@@ -67,6 +70,33 @@ export function StatusPanel({
               <div>
                 <dt>Rendered FPS</dt>
                 <dd>{isRunning ? previewMetrics.renderedFps.toFixed(1) : "—"}</dd>
+              </div>
+            </div>
+            <div className="telemetry-row telemetry-row--split">
+              <div>
+                <dt>Analysis FPS</dt>
+                <dd>{isRunning ? analysisStatus.measuredFps.toFixed(1) : "—"}</dd>
+              </div>
+              <div>
+                <dt>Analysis / submit</dt>
+                <dd>
+                  {isRunning
+                    ? `${analysisStatus.averageAnalysisMs.toFixed(2)} / ${status.averageAnalysisSubmitMs.toFixed(3)} ms`
+                    : "—"}
+                </dd>
+              </div>
+            </div>
+            <div className="telemetry-row telemetry-row--split">
+              <div>
+                <dt>ROI color match</dt>
+                <dd>{result ? `${(result.color.matchRatio * 100).toFixed(1)}%` : "—"}</dd>
+              </div>
+              <div>
+                <dt>Analysis dropped</dt>
+                <dd>
+                  {analysisStatus.droppedFrames.toLocaleString()} /{" "}
+                  {analysisStatus.submittedFrames.toLocaleString()}
+                </dd>
               </div>
             </div>
             <div className="telemetry-row telemetry-row--split">
@@ -128,11 +158,12 @@ export function StatusPanel({
         </span>
         <div>
           <strong>Direct MSMF pipeline</strong>
-          <p>No FFmpeg · No getUserMedia · JPEG frames over Tauri Channel</p>
+          <p>Latest-frame worker · {analysisStatus.config.maxFps} FPS budget · bounded queue</p>
         </div>
       </div>
 
       {status.error && <div className="error-message">{status.error}</div>}
+      {analysisStatus.error && <div className="error-message">{analysisStatus.error}</div>}
     </aside>
   );
 }

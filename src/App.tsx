@@ -3,10 +3,12 @@ import { CaptureControls } from "./components/CaptureControls";
 import { StatusPanel } from "./components/StatusPanel";
 import { VideoPreview } from "./components/VideoPreview";
 import {
+  type AnalysisStatus,
   type CaptureStatus,
   EMPTY_PREVIEW_METRICS,
   type FrameBytes,
   type FrameListener,
+  getAnalysisStatus,
   getCaptureStatus,
   type PreviewMetrics,
   reportPreviewMetrics,
@@ -29,12 +31,33 @@ const INITIAL_STATUS: CaptureStatus = {
   channelMbps: 0,
   averageChannelSendMs: 0,
   telemetryEnabled: false,
+  averageAnalysisSubmitMs: 0,
+  error: null,
+};
+
+const INITIAL_ANALYSIS_STATUS: AnalysisStatus = {
+  state: "stopped",
+  config: {
+    enabled: true,
+    roi: { x: 480, y: 270, width: 320, height: 180 },
+    targetColor: { red: 0, green: 255, blue: 0 },
+    colorTolerance: 48,
+    maxFps: 15,
+  },
+  submittedFrames: 0,
+  analyzedFrames: 0,
+  droppedFrames: 0,
+  failedFrames: 0,
+  measuredFps: 0,
+  averageAnalysisMs: 0,
+  lastResult: null,
   error: null,
 };
 
 export default function App() {
   const [status, setStatus] = useState<CaptureStatus>(INITIAL_STATUS);
   const [previewMetrics, setPreviewMetrics] = useState<PreviewMetrics>(EMPTY_PREVIEW_METRICS);
+  const [analysisStatus, setAnalysisStatus] = useState<AnalysisStatus>(INITIAL_ANALYSIS_STATUS);
   const [busy, setBusy] = useState(false);
   const [telemetryBusy, setTelemetryBusy] = useState(false);
   const frameListeners = useRef(new Set<FrameListener>());
@@ -56,11 +79,16 @@ export default function App() {
   }, []);
 
   const refreshStatus = useCallback(async () => {
-    try {
-      setStatus(await getCaptureStatus());
-    } catch (error) {
-      setStatus((current) => ({ ...current, state: "error", error: String(error) }));
-    }
+    const [capture, analysis] = await Promise.allSettled([getCaptureStatus(), getAnalysisStatus()]);
+    if (capture.status === "fulfilled") setStatus(capture.value);
+    else setStatus((current) => ({ ...current, state: "error", error: String(capture.reason) }));
+    if (analysis.status === "fulfilled") setAnalysisStatus(analysis.value);
+    else
+      setAnalysisStatus((current) => ({
+        ...current,
+        state: "error",
+        error: String(analysis.reason),
+      }));
   }, []);
 
   useEffect(() => {
@@ -135,6 +163,7 @@ export default function App() {
         <StatusPanel
           status={status}
           previewMetrics={previewMetrics}
+          analysisStatus={analysisStatus}
           telemetryBusy={telemetryBusy}
           onTelemetryToggle={() => void handleTelemetryToggle()}
         />

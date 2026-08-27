@@ -16,7 +16,77 @@ export interface CaptureStatus {
   channelMbps: number;
   averageChannelSendMs: number;
   telemetryEnabled: boolean;
+  averageAnalysisSubmitMs: number;
   error: string | null;
+}
+
+export interface Roi {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface RgbColor {
+  red: number;
+  green: number;
+  blue: number;
+}
+
+export interface AnalysisConfig {
+  enabled: boolean;
+  roi: Roi;
+  targetColor: RgbColor;
+  colorTolerance: number;
+  maxFps: number;
+}
+
+export interface ColorAnalysis {
+  target: RgbColor;
+  tolerance: number;
+  average: RgbColor;
+  matchingPixels: number;
+  totalPixels: number;
+  matchRatio: number;
+}
+
+export interface TemplateMatch {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  score: number;
+  searchStep: number;
+}
+
+export interface AnalysisResult {
+  frameNumber: number;
+  sourceWidth: number;
+  sourceHeight: number;
+  roi: Roi;
+  color: ColorAnalysis;
+  templateMatch: TemplateMatch | null;
+  queueDelayMs: number;
+  analysisMs: number;
+}
+
+export interface AnalysisStatus {
+  state: "running" | "stopped" | "error";
+  config: AnalysisConfig;
+  submittedFrames: number;
+  analyzedFrames: number;
+  droppedFrames: number;
+  failedFrames: number;
+  measuredFps: number;
+  averageAnalysisMs: number;
+  lastResult: AnalysisResult | null;
+  error: string | null;
+}
+
+export interface AnalysisTemplateInput {
+  width: number;
+  height: number;
+  grayscale: number[];
 }
 
 export interface PreviewMetrics {
@@ -73,4 +143,16 @@ export async function setTelemetryEnabled(enabled: boolean): Promise<CaptureStat
 
 export async function reportPreviewMetrics(metrics: PreviewMetrics): Promise<void> {
   return invoke("report_preview_metrics", { metrics });
+}
+
+export async function getAnalysisStatus(): Promise<AnalysisStatus> {
+  return invoke<AnalysisStatus>("get_analysis_status");
+}
+
+export async function configureAnalysis(config: AnalysisConfig): Promise<AnalysisStatus> {
+  return invoke<AnalysisStatus>("configure_analysis", { config });
+}
+
+export async function setAnalysisTemplate(template: AnalysisTemplateInput | null): Promise<void> {
+  return invoke("set_analysis_template", { template });
 }

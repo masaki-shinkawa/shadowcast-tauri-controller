@@ -17,6 +17,7 @@ use tauri::{
 use tracing::{error, info};
 
 use self::worker::run_capture;
+use crate::analysis::AnalysisManager;
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -34,6 +35,7 @@ pub struct CaptureStatus {
     channel_mbps: f64,
     average_channel_send_ms: f64,
     telemetry_enabled: bool,
+    average_analysis_submit_ms: f64,
     error: Option<String>,
 }
 
@@ -62,6 +64,7 @@ impl Default for CaptureStatus {
             channel_mbps: 0.0,
             average_channel_send_ms: 0.0,
             telemetry_enabled: false,
+            average_analysis_submit_ms: 0.0,
             error: None,
         }
     }
@@ -99,7 +102,11 @@ impl Default for CaptureManager {
 }
 
 impl CaptureManager {
-    fn start(&self, on_frame: Channel<Response>) -> Result<CaptureStatus, String> {
+    fn start(
+        &self,
+        on_frame: Channel<Response>,
+        analysis: &AnalysisManager,
+    ) -> Result<CaptureStatus, String> {
         let mut active = lock(&self.active);
 
         if active
@@ -126,6 +133,7 @@ impl CaptureManager {
         let thread_status = Arc::clone(&self.status);
         let thread_telemetry_enabled = Arc::clone(&self.telemetry_enabled);
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
+        let analysis_input = analysis.start()?;
 
         let capture_thread = thread::Builder::new()
             .name("shadowcast-capture".to_owned())
@@ -136,9 +144,13 @@ impl CaptureManager {
                     thread_status,
                     thread_telemetry_enabled,
                     ready_tx,
+                    analysis_input,
                 );
             })
-            .map_err(|error| format!("Failed to spawn capture thread: {error}"))?;
+            .map_err(|error| {
+                analysis.stop();
+                format!("Failed to spawn capture thread: {error}")
+            })?;
 
         match ready_rx.recv() {
             Ok(Ok(status)) => {
@@ -150,16 +162,18 @@ impl CaptureManager {
             }
             Ok(Err(message)) => {
                 let _ = capture_thread.join();
+                analysis.stop();
                 Err(message)
             }
             Err(error) => {
                 let _ = capture_thread.join();
+                analysis.stop();
                 Err(format!("Capture thread stopped during startup: {error}"))
             }
         }
     }
 
-    fn stop(&self) -> CaptureStatus {
+    fn stop(&self, analysis: &AnalysisManager) -> CaptureStatus {
         let active_capture = lock(&self.active).take();
         if let Some(active_capture) = active_capture {
             info!("stopping ShadowCast capture");
@@ -172,6 +186,7 @@ impl CaptureManager {
                 });
             }
         }
+        analysis.stop();
 
         update_status(&self.status, |status| {
             if !matches!(status.state, CaptureState::Error) {
@@ -215,14 +230,18 @@ impl Drop for CaptureManager {
 #[tauri::command(async)]
 pub fn start_capture(
     manager: State<'_, CaptureManager>,
+    analysis: State<'_, AnalysisManager>,
     on_frame: Channel<Response>,
 ) -> Result<CaptureStatus, String> {
-    manager.start(on_frame)
+    manager.start(on_frame, &analysis)
 }
 
 #[tauri::command(async)]
-pub fn stop_capture(manager: State<'_, CaptureManager>) -> Result<CaptureStatus, String> {
-    Ok(manager.stop())
+pub fn stop_capture(
+    manager: State<'_, CaptureManager>,
+    analysis: State<'_, AnalysisManager>,
+) -> Result<CaptureStatus, String> {
+    Ok(manager.stop(&analysis))
 }
 
 #[tauri::command]
@@ -256,6 +275,7 @@ fn reset_telemetry_metrics(status: &mut CaptureStatus) {
     status.average_jpeg_bytes = 0.0;
     status.channel_mbps = 0.0;
     status.average_channel_send_ms = 0.0;
+    status.average_analysis_submit_ms = 0.0;
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -283,6 +303,7 @@ mod tests {
             status.average_jpeg_bytes = 512.0;
             status.channel_mbps = 8.0;
             status.average_channel_send_ms = 0.1;
+            status.average_analysis_submit_ms = 0.2;
         });
 
         let status = manager.set_telemetry_enabled(true);
@@ -292,5 +313,6 @@ mod tests {
         assert_eq!(status.average_jpeg_bytes, 0.0);
         assert_eq!(status.channel_mbps, 0.0);
         assert_eq!(status.average_channel_send_ms, 0.0);
+        assert_eq!(status.average_analysis_submit_ms, 0.0);
     }
 }

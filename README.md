@@ -48,7 +48,7 @@ cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 
 ## 性能計測
 
-キャプチャ中は、キャプチャ／描画FPS、JPEGサイズ、Channel転送量、Channel送信呼び出し時間、WebView受信から描画までの時間、破棄フレーム数を画面と`tracing`ログへ1秒ごとに出力します。
+キャプチャ中は、キャプチャ／描画／解析FPS、JPEGサイズ、Channel転送量、Channel送信呼び出し時間、解析時間、WebView受信から描画までの時間、破棄フレーム数を画面と`tracing`ログへ出力します。
 
 30分連続試験の手順、入力から実画面表示までの遅延測定方法、基準結果、画像解析へ割り当て可能な処理予算は[性能ベースライン](docs/performance-baseline.md)を参照してください。CPUとメモリのCSV採取には次のスクリプトを使用します。
 
@@ -69,8 +69,14 @@ cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 
 フレーム取得はUIスレッドとは別の専用スレッドで実行します。フロントエンドは描画待ちフレームをキューに積まず、画面更新ごとに最新の1フレームだけを表示します。
 
+## 画像解析
+
+キャプチャ開始と同時に専用の解析ワーカーを起動し、中央320 × 180のROIを最大15 FPSで解析します。解析待ちは容量1の最新フレームスロットで、遅延時は未処理フレームを上書きするため無制限に蓄積しません。既定では緑色の一致率を返し、任意のグレースケールテンプレートを設定するとROI内の最良一致位置とスコアも返します。
+
+構造化結果、設定API、OpenCV導入方式、性能確認方法は[リアルタイム画像解析基盤](docs/image-analysis.md)を参照してください。
+
 ## MVPの範囲
 
-実装済み: デバイス検出、フォーマット列挙・選択、Start / Stop、MJPEG転送、映像表示、解像度・FPS・フォーマット・フレーム数表示、tracingログ。
+実装済み: デバイス検出、フォーマット列挙・選択、Start / Stop、MJPEG転送、映像表示、解像度・FPS・フォーマット・フレーム数表示、最新フレーム解析、ROI、色判定、テンプレートマッチング、tracingログ。
 
-未実装: OpenCV、AI/OCR、ゲーム状態判定、自動操作、コントローラー/HID/Serial制御。
+未実装: OpenCVランタイム、AI/OCR、ゲーム状態判定、自動操作、コントローラー/HID/Serial制御。
