@@ -4,9 +4,12 @@ import { StatusPanel } from "./components/StatusPanel";
 import { VideoPreview } from "./components/VideoPreview";
 import {
   type CaptureStatus,
+  EMPTY_PREVIEW_METRICS,
   type FrameBytes,
   type FrameListener,
   getCaptureStatus,
+  type PreviewMetrics,
+  reportPreviewMetrics,
   startCapture,
   stopCapture,
 } from "./lib/tauri";
@@ -20,11 +23,16 @@ const INITIAL_STATUS: CaptureStatus = {
   measuredFps: 0,
   frameFormat: null,
   frameCount: 0,
+  jpegBytes: 0,
+  averageJpegBytes: 0,
+  channelMbps: 0,
+  averageChannelSendMs: 0,
   error: null,
 };
 
 export default function App() {
   const [status, setStatus] = useState<CaptureStatus>(INITIAL_STATUS);
+  const [previewMetrics, setPreviewMetrics] = useState<PreviewMetrics>(EMPTY_PREVIEW_METRICS);
   const [busy, setBusy] = useState(false);
   const frameListeners = useRef(new Set<FrameListener>());
 
@@ -35,6 +43,13 @@ export default function App() {
 
   const broadcastFrame = useCallback((frame: FrameBytes) => {
     for (const listener of frameListeners.current) listener(frame);
+  }, []);
+
+  const handlePreviewMetrics = useCallback((metrics: PreviewMetrics) => {
+    setPreviewMetrics(metrics);
+    if (metrics.receivedFps > 0) {
+      void reportPreviewMetrics(metrics).catch(() => undefined);
+    }
   }, []);
 
   const refreshStatus = useCallback(async () => {
@@ -95,8 +110,8 @@ export default function App() {
       </header>
 
       <div className="workspace">
-        <VideoPreview subscribe={subscribe} running={running} />
-        <StatusPanel status={status} />
+        <VideoPreview subscribe={subscribe} running={running} onMetrics={handlePreviewMetrics} />
+        <StatusPanel status={status} previewMetrics={previewMetrics} />
       </div>
 
       <footer className="app-footer">

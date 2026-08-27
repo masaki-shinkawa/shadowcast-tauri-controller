@@ -1,31 +1,60 @@
 import { useEffect, useRef } from "react";
-import type { FrameBytes, FrameListener } from "../lib/tauri";
+import {
+  EMPTY_PREVIEW_METRICS,
+  type FrameBytes,
+  type FrameListener,
+  type PreviewMetrics,
+} from "../lib/tauri";
 
 interface VideoPreviewProps {
   subscribe: (listener: FrameListener) => () => void;
   running: boolean;
+  onMetrics: (metrics: PreviewMetrics) => void;
 }
 
-export function VideoPreview({ subscribe, running }: VideoPreviewProps) {
+interface PendingFrame {
+  bytes: FrameBytes;
+  receivedAt: number;
+}
+
+export function VideoPreview({ subscribe, running, onMetrics }: VideoPreviewProps) {
   const imageRef = useRef<HTMLImageElement>(null);
 
   useEffect(() => {
-    if (!running) imageRef.current?.removeAttribute("src");
+    if (!running) {
+      imageRef.current?.removeAttribute("src");
+      onMetrics(EMPTY_PREVIEW_METRICS);
+    }
 
-    let latestFrame: FrameBytes | null = null;
+    let latestFrame: PendingFrame | null = null;
     let animationFrame: number | null = null;
+    let pendingLoad = false;
     const objectUrls = new Set<string>();
+    let intervalStarted = performance.now();
+    let intervalReceived = 0;
+    let intervalRendered = 0;
+    let intervalBytes = 0;
+    let intervalDrawLatency = 0;
+    let intervalDrawSamples = 0;
+    let droppedFrames = 0;
 
     const paintLatestFrame = () => {
       animationFrame = null;
       const image = imageRef.current;
       if (!image || !latestFrame) return;
 
-      const url = URL.createObjectURL(new Blob([latestFrame], { type: "image/jpeg" }));
+      const frame = latestFrame;
+      const url = URL.createObjectURL(new Blob([frame.bytes], { type: "image/jpeg" }));
       objectUrls.add(url);
       latestFrame = null;
 
+      if (pendingLoad) droppedFrames += 1;
+      pendingLoad = true;
       image.onload = () => {
+        pendingLoad = false;
+        intervalRendered += 1;
+        intervalDrawLatency += performance.now() - frame.receivedAt;
+        intervalDrawSamples += 1;
         for (const existingUrl of objectUrls) {
           if (existingUrl !== url) {
             URL.revokeObjectURL(existingUrl);
@@ -45,19 +74,43 @@ export function VideoPreview({ subscribe, running }: VideoPreviewProps) {
     };
 
     const unsubscribe = subscribe((frame) => {
-      latestFrame = frame;
+      if (latestFrame) droppedFrames += 1;
+      latestFrame = { bytes: frame, receivedAt: performance.now() };
+      intervalReceived += 1;
+      intervalBytes += frame.byteLength;
       if (animationFrame === null) {
         animationFrame = requestAnimationFrame(paintLatestFrame);
       }
     });
 
+    const metricsInterval = window.setInterval(() => {
+      const now = performance.now();
+      const elapsedSeconds = (now - intervalStarted) / 1_000;
+      if (elapsedSeconds <= 0) return;
+
+      onMetrics({
+        receivedFps: intervalReceived / elapsedSeconds,
+        renderedFps: intervalRendered / elapsedSeconds,
+        receiveMbps: (intervalBytes * 8) / elapsedSeconds / 1_000_000,
+        receiveToDrawMs: intervalDrawSamples === 0 ? 0 : intervalDrawLatency / intervalDrawSamples,
+        droppedFrames,
+      });
+      intervalStarted = now;
+      intervalReceived = 0;
+      intervalRendered = 0;
+      intervalBytes = 0;
+      intervalDrawLatency = 0;
+      intervalDrawSamples = 0;
+    }, 1_000);
+
     return () => {
       unsubscribe();
+      window.clearInterval(metricsInterval);
       if (animationFrame !== null) cancelAnimationFrame(animationFrame);
       for (const url of objectUrls) URL.revokeObjectURL(url);
       imageRef.current?.removeAttribute("src");
     };
-  }, [running, subscribe]);
+  }, [running, subscribe, onMetrics]);
 
   return (
     <section className="preview-shell" aria-label="ShadowCast video preview">

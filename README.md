@@ -45,6 +45,16 @@ cargo test --manifest-path src-tauri/Cargo.toml
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 ```
 
+## 性能計測
+
+キャプチャ中は、キャプチャ／描画FPS、JPEGサイズ、Channel転送量、Channel送信呼び出し時間、WebView受信から描画までの時間、破棄フレーム数を画面と`tracing`ログへ1秒ごとに出力します。
+
+30分連続試験の手順、入力から実画面表示までの遅延測定方法、基準結果、画像解析へ割り当て可能な処理予算は[性能ベースライン](docs/performance-baseline.md)を参照してください。CPUとメモリのCSV採取には次のスクリプトを使用します。
+
+```powershell
+.\scripts\measure-performance.ps1 -DurationMinutes 30
+```
+
 ## キャプチャ方針
 
 1. Media FoundationからWindowsのカメラ一覧を取得する
@@ -60,4 +70,4 @@ cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 
 実装済み: デバイス検出、フォーマット列挙・選択、Start / Stop、MJPEG転送、映像表示、解像度・FPS・フォーマット・フレーム数表示、tracingログ。
 
-未実装: OpenCV、AI/OCR、ゲーム状態判定、自動操作、コントローラー/HID/Serial制御。画像解析フェーズへ進む前にCPU、メモリ、遅延、Channel転送負荷を実機計測してください。
+未実装: OpenCV、AI/OCR、ゲーム状態判定、自動操作、コントローラー/HID/Serial制御。

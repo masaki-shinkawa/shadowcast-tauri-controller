@@ -11,8 +11,28 @@ export interface CaptureStatus {
   measuredFps: number;
   frameFormat: string | null;
   frameCount: number;
+  jpegBytes: number;
+  averageJpegBytes: number;
+  channelMbps: number;
+  averageChannelSendMs: number;
   error: string | null;
 }
+
+export interface PreviewMetrics {
+  receivedFps: number;
+  renderedFps: number;
+  receiveMbps: number;
+  receiveToDrawMs: number;
+  droppedFrames: number;
+}
+
+export const EMPTY_PREVIEW_METRICS: PreviewMetrics = {
+  receivedFps: 0,
+  renderedFps: 0,
+  receiveMbps: 0,
+  receiveToDrawMs: 0,
+  droppedFrames: 0,
+};
 
 type FramePayload = ArrayBuffer | Uint8Array | number[];
 
@@ -44,4 +64,8 @@ export async function stopCapture(): Promise<CaptureStatus> {
 
 export async function getCaptureStatus(): Promise<CaptureStatus> {
   return invoke<CaptureStatus>("get_capture_status");
+}
+
+export async function reportPreviewMetrics(metrics: PreviewMetrics): Promise<void> {
+  return invoke("report_preview_metrics", { metrics });
 }

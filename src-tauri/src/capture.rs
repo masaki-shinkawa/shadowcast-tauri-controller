@@ -18,7 +18,7 @@ use nokhwa::{
     },
     Camera,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{
     ipc::{Channel, Response},
     State,
@@ -48,6 +48,10 @@ pub struct CaptureStatus {
     measured_fps: f64,
     frame_format: Option<String>,
     frame_count: u64,
+    jpeg_bytes: u64,
+    average_jpeg_bytes: f64,
+    channel_mbps: f64,
+    average_channel_send_ms: f64,
     error: Option<String>,
 }
 
@@ -71,6 +75,10 @@ impl Default for CaptureStatus {
             measured_fps: 0.0,
             frame_format: None,
             frame_count: 0,
+            jpeg_bytes: 0,
+            average_jpeg_bytes: 0.0,
+            channel_mbps: 0.0,
+            average_channel_send_ms: 0.0,
             error: None,
         }
     }
@@ -84,6 +92,16 @@ struct ActiveCapture {
 pub struct CaptureManager {
     active: Mutex<Option<ActiveCapture>>,
     status: Arc<Mutex<CaptureStatus>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewMetrics {
+    received_fps: f64,
+    rendered_fps: f64,
+    receive_mbps: f64,
+    receive_to_draw_ms: f64,
+    dropped_frames: u64,
 }
 
 impl Default for CaptureManager {
@@ -200,6 +218,18 @@ pub fn stop_capture(manager: State<'_, CaptureManager>) -> Result<CaptureStatus,
 #[tauri::command]
 pub fn get_capture_status(manager: State<'_, CaptureManager>) -> CaptureStatus {
     manager.status()
+}
+
+#[tauri::command]
+pub fn report_preview_metrics(metrics: PreviewMetrics) {
+    info!(
+        received_fps = metrics.received_fps,
+        rendered_fps = metrics.rendered_fps,
+        receive_mbps = metrics.receive_mbps,
+        receive_to_draw_ms = metrics.receive_to_draw_ms,
+        dropped_frames = metrics.dropped_frames,
+        "preview performance"
+    );
 }
 
 fn run_capture(
@@ -330,7 +360,10 @@ fn capture_loop(
     }
 
     let mut total_frames = 0_u64;
+    let mut total_jpeg_bytes = 0_u64;
     let mut interval_frames = 0_u64;
+    let mut interval_jpeg_bytes = 0_u64;
+    let mut interval_channel_send = Duration::ZERO;
     let mut interval_started = Instant::now();
 
     while !stop.load(AtomicOrdering::Acquire) {
@@ -357,22 +390,47 @@ fn capture_loop(
             jpeg.into_inner()
         };
 
+        let jpeg_bytes = jpeg.len() as u64;
+        let channel_send_started = Instant::now();
         if on_frame.send(Response::new(jpeg)).is_err() {
             info!("frontend frame channel closed");
             break;
         }
+        let channel_send_elapsed = channel_send_started.elapsed();
 
         total_frames += 1;
+        total_jpeg_bytes += jpeg_bytes;
         interval_frames += 1;
+        interval_jpeg_bytes += jpeg_bytes;
+        interval_channel_send += channel_send_elapsed;
         let elapsed = interval_started.elapsed();
         if elapsed >= Duration::from_secs(1) {
             let measured_fps = interval_frames as f64 / elapsed.as_secs_f64();
+            let channel_mbps =
+                interval_jpeg_bytes as f64 * 8.0 / elapsed.as_secs_f64() / 1_000_000.0;
+            let average_jpeg_bytes = total_jpeg_bytes as f64 / total_frames as f64;
+            let average_channel_send_ms =
+                interval_channel_send.as_secs_f64() * 1_000.0 / interval_frames as f64;
             update_status(status, |capture_status| {
                 capture_status.frame_count = total_frames;
                 capture_status.measured_fps = measured_fps;
+                capture_status.jpeg_bytes = total_jpeg_bytes;
+                capture_status.average_jpeg_bytes = average_jpeg_bytes;
+                capture_status.channel_mbps = channel_mbps;
+                capture_status.average_channel_send_ms = average_channel_send_ms;
             });
+            info!(
+                capture_fps = measured_fps,
+                average_jpeg_kib = average_jpeg_bytes / 1024.0,
+                channel_mbps,
+                average_channel_send_ms,
+                total_frames,
+                "capture performance"
+            );
             interval_started = Instant::now();
             interval_frames = 0;
+            interval_jpeg_bytes = 0;
+            interval_channel_send = Duration::ZERO;
         }
     }
 
@@ -381,6 +439,12 @@ fn capture_loop(
     }
     update_status(status, |capture_status| {
         capture_status.frame_count = total_frames;
+        capture_status.jpeg_bytes = total_jpeg_bytes;
+        capture_status.average_jpeg_bytes = if total_frames == 0 {
+            0.0
+        } else {
+            total_jpeg_bytes as f64 / total_frames as f64
+        };
     });
     Ok(())
 }
@@ -415,6 +479,10 @@ fn running_status(
         measured_fps: 0.0,
         frame_format: Some(format_name(stream_format.format()).to_owned()),
         frame_count: 0,
+        jpeg_bytes: 0,
+        average_jpeg_bytes: 0.0,
+        channel_mbps: 0.0,
+        average_channel_send_ms: 0.0,
         error: None,
     }
 }

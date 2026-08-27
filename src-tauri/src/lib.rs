@@ -13,6 +13,7 @@ pub fn run() {
             capture::start_capture,
             capture::stop_capture,
             capture::get_capture_status,
+            capture::report_preview_metrics,
         ])
         .run(tauri::generate_context!())
         .expect("error while running ShadowCast Controller");

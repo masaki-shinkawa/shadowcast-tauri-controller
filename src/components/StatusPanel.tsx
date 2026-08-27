@@ -1,14 +1,19 @@
-import type { CaptureStatus } from "../lib/tauri";
+import type { CaptureStatus, PreviewMetrics } from "../lib/tauri";
 
 interface StatusPanelProps {
   status: CaptureStatus;
+  previewMetrics: PreviewMetrics;
 }
 
 function formatResolution(status: CaptureStatus) {
   return status.width && status.height ? `${status.width} × ${status.height}` : "—";
 }
 
-export function StatusPanel({ status }: StatusPanelProps) {
+function formatKib(bytes: number) {
+  return bytes > 0 ? `${(bytes / 1024).toFixed(1)} KiB` : "—";
+}
+
+export function StatusPanel({ status, previewMetrics }: StatusPanelProps) {
   const isRunning = status.state === "running";
 
   return (
@@ -35,22 +40,46 @@ export function StatusPanel({ status }: StatusPanelProps) {
         </div>
         <div className="telemetry-row telemetry-row--split">
           <div>
-            <dt>Target FPS</dt>
-            <dd>{status.targetFps ?? "—"}</dd>
+            <dt>Capture FPS</dt>
+            <dd>{isRunning ? status.measuredFps.toFixed(1) : "—"}</dd>
           </div>
           <div>
-            <dt>Measured</dt>
-            <dd>{isRunning ? status.measuredFps.toFixed(1) : "—"}</dd>
+            <dt>Rendered FPS</dt>
+            <dd>{isRunning ? previewMetrics.renderedFps.toFixed(1) : "—"}</dd>
           </div>
         </div>
         <div className="telemetry-row telemetry-row--split">
           <div>
-            <dt>Frame format</dt>
-            <dd className="accent-value">{status.frameFormat ?? "—"}</dd>
+            <dt>JPEG average</dt>
+            <dd>{formatKib(status.averageJpegBytes)}</dd>
           </div>
           <div>
-            <dt>Frames</dt>
-            <dd>{status.frameCount.toLocaleString()}</dd>
+            <dt>Channel</dt>
+            <dd>{isRunning ? `${status.channelMbps.toFixed(1)} Mb/s` : "—"}</dd>
+          </div>
+        </div>
+        <div className="telemetry-row telemetry-row--split">
+          <div>
+            <dt>Receive → draw</dt>
+            <dd>{isRunning ? `${previewMetrics.receiveToDrawMs.toFixed(1)} ms` : "—"}</dd>
+          </div>
+          <div>
+            <dt>Dropped / frames</dt>
+            <dd>
+              {previewMetrics.droppedFrames.toLocaleString()} / {status.frameCount.toLocaleString()}
+            </dd>
+          </div>
+        </div>
+        <div className="telemetry-row telemetry-row--split">
+          <div>
+            <dt>Target / format</dt>
+            <dd className="accent-value">
+              {status.targetFps ?? "—"} / {status.frameFormat ?? "—"}
+            </dd>
+          </div>
+          <div>
+            <dt>Send call</dt>
+            <dd>{isRunning ? `${status.averageChannelSendMs.toFixed(3)} ms` : "—"}</dd>
           </div>
         </div>
       </dl>
