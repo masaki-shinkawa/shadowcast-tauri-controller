@@ -6,6 +6,8 @@
 
 解析ワーカーはキャプチャ、WebViewのどちらとも独立したスレッドで動作します。既定の上限は15 FPSです。#3の実機ベースライン（Capture FPS平均59.99、1フレーム16.67 ms）に対し、解析は1フレーム4 ms以内を初期予算とします。
 
+`tauri dev`でも実機性能を確認できるよう、JPEGデコードを担う`image`、`zune-jpeg`、`zune-core`だけはdev profileで最適化します。アプリ本体は通常のdev profileのままなので、デバッグ情報と短い再ビルド時間は維持されます。
+
 ```text
 Media Foundation capture (60 FPS)
   ├─ Tauri Channel → WebView preview
@@ -79,6 +81,7 @@ await invoke("set_analysis_template", {
 
 - Analysis FPS
 - 平均解析時間 / キャプチャスレッドの平均投入時間
+- 最新フレームのJPEGデコード / ROI色解析 / テンプレート照合時間
 - ROI色一致率
 - 上書き破棄フレーム数 / 投入フレーム数
 

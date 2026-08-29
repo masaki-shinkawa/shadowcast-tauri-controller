@@ -19,3 +19,14 @@ serde = { version = "1", features = ["derive"] }
 tauri = { version = "2.11", features = [] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# JPEG analysis is exercised from `tauri dev`, where dependencies would otherwise
+# be unoptimized and decode a 1280 x 720 MJPEG frame far below the 15 FPS budget.
+[profile.dev.package.image]
+opt-level = 3
+
+[profile.dev.package.zune-core]
+opt-level = 3
+
+[profile.dev.package.zune-jpeg]
+opt-level = 3

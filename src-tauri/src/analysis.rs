@@ -109,6 +109,9 @@ pub struct AnalysisResult {
     template_match: Option<TemplateMatch>,
     queue_delay_ms: f64,
     analysis_ms: f64,
+    jpeg_decode_ms: f64,
+    color_analysis_ms: f64,
+    template_match_ms: f64,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -521,10 +524,14 @@ fn analyze_jpeg(
     config: &AnalysisConfig,
     template: Option<&AnalysisTemplate>,
 ) -> Result<AnalysisResult, String> {
+    let decode_started = Instant::now();
     let image = image::load_from_memory(jpeg)
         .map_err(|error| format!("Failed to decode analysis frame: {error}"))?
         .to_rgb8();
-    analyze_rgb(&image, frame_number, config, template)
+    let jpeg_decode_ms = decode_started.elapsed().as_secs_f64() * 1_000.0;
+    let mut result = analyze_rgb(&image, frame_number, config, template)?;
+    result.jpeg_decode_ms = jpeg_decode_ms;
+    Ok(result)
 }
 
 fn analyze_rgb(
@@ -533,6 +540,7 @@ fn analyze_rgb(
     config: &AnalysisConfig,
     template: Option<&AnalysisTemplate>,
 ) -> Result<AnalysisResult, String> {
+    let color_started = Instant::now();
     let roi = clamp_roi(config.roi, image.width(), image.height())?;
     let mut sums = [0_u64; 3];
     let mut matching_pixels = 0_u64;
@@ -558,9 +566,17 @@ fn analyze_rgb(
         green: (sums[1] / total_pixels) as u8,
         blue: (sums[2] / total_pixels) as u8,
     };
-    let template_match = template
-        .map(|template| match_template(image, roi, template))
-        .transpose()?;
+    let color_analysis_ms = color_started.elapsed().as_secs_f64() * 1_000.0;
+    let (template_match, template_match_ms) = if let Some(template) = template {
+        let template_started = Instant::now();
+        let template_match = match_template(image, roi, template)?;
+        (
+            Some(template_match),
+            template_started.elapsed().as_secs_f64() * 1_000.0,
+        )
+    } else {
+        (None, 0.0)
+    };
 
     Ok(AnalysisResult {
         frame_number,
@@ -578,6 +594,9 @@ fn analyze_rgb(
         template_match,
         queue_delay_ms: 0.0,
         analysis_ms: 0.0,
+        jpeg_decode_ms: 0.0,
+        color_analysis_ms,
+        template_match_ms,
     })
 }
 

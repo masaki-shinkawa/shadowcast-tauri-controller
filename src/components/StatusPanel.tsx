@@ -1,3 +1,5 @@
+import { useEffect, useRef, useState } from "react";
+import { copyText, formatCaptureDebugStatus } from "../lib/debugStatus";
 import type { AnalysisStatus, CaptureStatus, PreviewMetrics } from "../lib/tauri";
 
 interface StatusPanelProps {
@@ -25,6 +27,26 @@ export function StatusPanel({
 }: StatusPanelProps) {
   const isRunning = status.state === "running";
   const result = analysisStatus.lastResult;
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "error">("idle");
+  const resetCopyState = useRef<number | null>(null);
+
+  useEffect(
+    () => () => {
+      if (resetCopyState.current !== null) window.clearTimeout(resetCopyState.current);
+    },
+    [],
+  );
+
+  const handleCopyDebug = async () => {
+    if (resetCopyState.current !== null) window.clearTimeout(resetCopyState.current);
+    try {
+      await copyText(formatCaptureDebugStatus(status, previewMetrics, analysisStatus));
+      setCopyState("copied");
+    } catch {
+      setCopyState("error");
+    }
+    resetCopyState.current = window.setTimeout(() => setCopyState("idle"), 2000);
+  };
 
   return (
     <aside className="status-panel">
@@ -43,6 +65,17 @@ export function StatusPanel({
           >
             <span aria-hidden="true" />
             TELEMETRY {status.telemetryEnabled ? "ON" : "OFF"}
+          </button>
+          <button
+            type="button"
+            className={`debug-copy debug-copy--${copyState}`}
+            onClick={() => void handleCopyDebug()}
+          >
+            {copyState === "copied"
+              ? "COPIED"
+              : copyState === "error"
+                ? "COPY FAILED"
+                : "COPY DEBUG"}
           </button>
           <div className={`status-pill status-pill--${status.state}`}>
             <span />
@@ -71,6 +104,14 @@ export function StatusPanel({
                 <dt>Rendered FPS</dt>
                 <dd>{isRunning ? previewMetrics.renderedFps.toFixed(1) : "—"}</dd>
               </div>
+            </div>
+            <div className="telemetry-row">
+              <dt>Decode / color / template</dt>
+              <dd>
+                {result
+                  ? `${result.jpegDecodeMs.toFixed(2)} / ${result.colorAnalysisMs.toFixed(2)} / ${result.templateMatchMs.toFixed(2)} ms`
+                  : "—"}
+              </dd>
             </div>
             <div className="telemetry-row telemetry-row--split">
               <div>

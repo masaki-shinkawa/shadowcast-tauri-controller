@@ -68,6 +68,9 @@ export interface AnalysisResult {
   templateMatch: TemplateMatch | null;
   queueDelayMs: number;
   analysisMs: number;
+  jpegDecodeMs: number;
+  colorAnalysisMs: number;
+  templateMatchMs: number;
 }
 
 export interface AnalysisStatus {
