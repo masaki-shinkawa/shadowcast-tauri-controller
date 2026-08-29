@@ -320,6 +320,34 @@ h2 {
   opacity: 0.55;
 }
 
+.debug-copy {
+  padding: 6px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  color: #b6bec7;
+  background: rgba(5, 7, 9, 0.62);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+
+.debug-copy:hover {
+  border-color: rgba(184, 255, 56, 0.35);
+  color: var(--green);
+}
+
+.debug-copy--copied {
+  border-color: rgba(184, 255, 56, 0.35);
+  color: var(--green);
+  background: rgba(184, 255, 56, 0.07);
+}
+
+.debug-copy--error {
+  border-color: rgba(255, 118, 108, 0.35);
+  color: #ff9b94;
+}
+
 .status-pill {
   padding: 6px 8px;
   display: flex;

@@ -1,8 +1,11 @@
-import type { CaptureStatus, PreviewMetrics } from "../lib/tauri";
+import { useEffect, useRef, useState } from "react";
+import { copyText, formatCaptureDebugStatus } from "../lib/debugStatus";
+import type { AnalysisStatus, CaptureStatus, PreviewMetrics } from "../lib/tauri";
 
 interface StatusPanelProps {
   status: CaptureStatus;
   previewMetrics: PreviewMetrics;
+  analysisStatus: AnalysisStatus;
   telemetryBusy: boolean;
   onTelemetryToggle: () => void;
 }
@@ -18,10 +21,32 @@ function formatKib(bytes: number) {
 export function StatusPanel({
   status,
   previewMetrics,
+  analysisStatus,
   telemetryBusy,
   onTelemetryToggle,
 }: StatusPanelProps) {
   const isRunning = status.state === "running";
+  const result = analysisStatus.lastResult;
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "error">("idle");
+  const resetCopyState = useRef<number | null>(null);
+
+  useEffect(
+    () => () => {
+      if (resetCopyState.current !== null) window.clearTimeout(resetCopyState.current);
+    },
+    [],
+  );
+
+  const handleCopyDebug = async () => {
+    if (resetCopyState.current !== null) window.clearTimeout(resetCopyState.current);
+    try {
+      await copyText(formatCaptureDebugStatus(status, previewMetrics, analysisStatus));
+      setCopyState("copied");
+    } catch {
+      setCopyState("error");
+    }
+    resetCopyState.current = window.setTimeout(() => setCopyState("idle"), 2000);
+  };
 
   return (
     <aside className="status-panel">
@@ -40,6 +65,17 @@ export function StatusPanel({
           >
             <span aria-hidden="true" />
             TELEMETRY {status.telemetryEnabled ? "ON" : "OFF"}
+          </button>
+          <button
+            type="button"
+            className={`debug-copy debug-copy--${copyState}`}
+            onClick={() => void handleCopyDebug()}
+          >
+            {copyState === "copied"
+              ? "COPIED"
+              : copyState === "error"
+                ? "COPY FAILED"
+                : "COPY DEBUG"}
           </button>
           <div className={`status-pill status-pill--${status.state}`}>
             <span />
@@ -67,6 +103,41 @@ export function StatusPanel({
               <div>
                 <dt>Rendered FPS</dt>
                 <dd>{isRunning ? previewMetrics.renderedFps.toFixed(1) : "—"}</dd>
+              </div>
+            </div>
+            <div className="telemetry-row">
+              <dt>Decode / color / template</dt>
+              <dd>
+                {result
+                  ? `${result.jpegDecodeMs.toFixed(2)} / ${result.colorAnalysisMs.toFixed(2)} / ${result.templateMatchMs.toFixed(2)} ms`
+                  : "—"}
+              </dd>
+            </div>
+            <div className="telemetry-row telemetry-row--split">
+              <div>
+                <dt>Analysis FPS</dt>
+                <dd>{isRunning ? analysisStatus.measuredFps.toFixed(1) : "—"}</dd>
+              </div>
+              <div>
+                <dt>Analysis / submit</dt>
+                <dd>
+                  {isRunning
+                    ? `${analysisStatus.averageAnalysisMs.toFixed(2)} / ${status.averageAnalysisSubmitMs.toFixed(3)} ms`
+                    : "—"}
+                </dd>
+              </div>
+            </div>
+            <div className="telemetry-row telemetry-row--split">
+              <div>
+                <dt>ROI color match</dt>
+                <dd>{result ? `${(result.color.matchRatio * 100).toFixed(1)}%` : "—"}</dd>
+              </div>
+              <div>
+                <dt>Analysis dropped</dt>
+                <dd>
+                  {analysisStatus.droppedFrames.toLocaleString()} /{" "}
+                  {analysisStatus.submittedFrames.toLocaleString()}
+                </dd>
               </div>
             </div>
             <div className="telemetry-row telemetry-row--split">
@@ -128,11 +199,12 @@ export function StatusPanel({
         </span>
         <div>
           <strong>Direct MSMF pipeline</strong>
-          <p>No FFmpeg · No getUserMedia · JPEG frames over Tauri Channel</p>
+          <p>Latest-frame worker · {analysisStatus.config.maxFps} FPS budget · bounded queue</p>
         </div>
       </div>
 
       {status.error && <div className="error-message">{status.error}</div>}
+      {analysisStatus.error && <div className="error-message">{analysisStatus.error}</div>}
     </aside>
   );
 }

@@ -1,5 +1,7 @@
+mod analysis;
 mod capture;
 
+use analysis::AnalysisManager;
 use capture::CaptureManager;
 use tracing_subscriber::EnvFilter;
 
@@ -9,12 +11,16 @@ pub fn run() {
 
     tauri::Builder::default()
         .manage(CaptureManager::default())
+        .manage(AnalysisManager::default())
         .invoke_handler(tauri::generate_handler![
             capture::start_capture,
             capture::stop_capture,
             capture::get_capture_status,
             capture::set_telemetry_enabled,
             capture::report_preview_metrics,
+            analysis::get_analysis_status,
+            analysis::configure_analysis,
+            analysis::set_analysis_template,
         ])
         .run(tauri::generate_context!())
         .expect("error while running ShadowCast Controller");

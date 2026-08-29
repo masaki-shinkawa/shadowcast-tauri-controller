@@ -15,6 +15,8 @@ use nokhwa::{
 use tauri::ipc::{Channel, Response};
 use tracing::{error, info, warn};
 
+use crate::analysis::AnalysisInput;
+
 use super::{
     device::{format_name, open_shadowcast, OpenedCamera},
     lock, update_status, CaptureState, CaptureStatus,
@@ -26,9 +28,18 @@ pub(super) fn run_capture(
     status: Arc<Mutex<CaptureStatus>>,
     telemetry_enabled: Arc<AtomicBool>,
     ready: mpsc::SyncSender<Result<CaptureStatus, String>>,
+    analysis: AnalysisInput,
 ) {
     let mut ready = Some(ready);
-    let result = capture_loop(&on_frame, &stop, &status, &telemetry_enabled, &mut ready);
+    let result = capture_loop(
+        &on_frame,
+        &stop,
+        &status,
+        &telemetry_enabled,
+        &mut ready,
+        &analysis,
+    );
+    analysis.close();
 
     if let Err(message) = result {
         error!(error = %message, "ShadowCast capture failed");
@@ -55,6 +66,7 @@ fn capture_loop(
     status: &Arc<Mutex<CaptureStatus>>,
     telemetry_enabled: &AtomicBool,
     ready: &mut Option<mpsc::SyncSender<Result<CaptureStatus, String>>>,
+    analysis: &AnalysisInput,
 ) -> Result<(), String> {
     let OpenedCamera {
         mut camera,
@@ -82,6 +94,7 @@ fn capture_loop(
     let mut interval_frames = 0_u64;
     let mut interval_jpeg_bytes = 0_u64;
     let mut interval_channel_send = Duration::ZERO;
+    let mut interval_analysis_submit = Duration::ZERO;
     let mut interval_started = Instant::now();
     let mut telemetry_was_enabled = false;
 
@@ -116,10 +129,14 @@ fn capture_loop(
             interval_frames = 0;
             interval_jpeg_bytes = 0;
             interval_channel_send = Duration::ZERO;
+            interval_analysis_submit = Duration::ZERO;
             interval_started = Instant::now();
         }
 
         let jpeg_bytes = jpeg.len() as u64;
+        let analysis_submit_started = telemetry_active.then(Instant::now);
+        analysis.submit(total_frames + 1, &jpeg);
+        let analysis_submit_elapsed = analysis_submit_started.map(|started| started.elapsed());
         let channel_send_started = telemetry_active.then(Instant::now);
         if on_frame.send(Response::new(jpeg)).is_err() {
             info!("frontend frame channel closed");
@@ -134,6 +151,7 @@ fn capture_loop(
             interval_frames += 1;
             interval_jpeg_bytes += jpeg_bytes;
             interval_channel_send += channel_send_elapsed.unwrap_or_default();
+            interval_analysis_submit += analysis_submit_elapsed.unwrap_or_default();
             let elapsed = interval_started.elapsed();
             if elapsed >= Duration::from_secs(1) {
                 let measured_fps = interval_frames as f64 / elapsed.as_secs_f64();
@@ -142,6 +160,8 @@ fn capture_loop(
                 let average_jpeg_bytes = total_jpeg_bytes as f64 / total_telemetry_frames as f64;
                 let average_channel_send_ms =
                     interval_channel_send.as_secs_f64() * 1_000.0 / interval_frames as f64;
+                let average_analysis_submit_ms =
+                    interval_analysis_submit.as_secs_f64() * 1_000.0 / interval_frames as f64;
                 update_status(status, |capture_status| {
                     if capture_status.telemetry_enabled {
                         capture_status.frame_count = total_frames;
@@ -150,6 +170,7 @@ fn capture_loop(
                         capture_status.average_jpeg_bytes = average_jpeg_bytes;
                         capture_status.channel_mbps = channel_mbps;
                         capture_status.average_channel_send_ms = average_channel_send_ms;
+                        capture_status.average_analysis_submit_ms = average_analysis_submit_ms;
                     }
                 });
                 info!(
@@ -157,6 +178,7 @@ fn capture_loop(
                     average_jpeg_kib = average_jpeg_bytes / 1024.0,
                     channel_mbps,
                     average_channel_send_ms,
+                    average_analysis_submit_ms,
                     total_frames,
                     "capture performance"
                 );
@@ -164,6 +186,7 @@ fn capture_loop(
                 interval_frames = 0;
                 interval_jpeg_bytes = 0;
                 interval_channel_send = Duration::ZERO;
+                interval_analysis_submit = Duration::ZERO;
             }
         }
         telemetry_was_enabled = telemetry_active;
@@ -211,6 +234,7 @@ fn running_status(
         channel_mbps: 0.0,
         average_channel_send_ms: 0.0,
         telemetry_enabled,
+        average_analysis_submit_ms: 0.0,
         error: None,
     }
 }
