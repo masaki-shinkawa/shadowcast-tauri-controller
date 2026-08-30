@@ -91,6 +91,6 @@ export async function copyText(text: string) {
     textarea.select();
     const copied = document.execCommand("copy");
     textarea.remove();
-    if (!copied) throw new Error("Could not copy debug status");
+    if (!copied) throw new Error("Could not copy text");
   }
 }

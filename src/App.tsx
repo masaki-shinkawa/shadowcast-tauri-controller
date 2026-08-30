@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { CaptureControls } from "./components/CaptureControls";
 import { StatusPanel } from "./components/StatusPanel";
 import { VideoPreview } from "./components/VideoPreview";
+import { copyText } from "./lib/debugStatus";
 import {
   type AnalysisStatus,
   type CaptureStatus,
@@ -168,7 +169,12 @@ export default function App() {
     setScreenshotMessage(null);
     try {
       const path = await saveGameScreenshot(frame);
-      setScreenshotMessage(`Saved: ${path}`);
+      try {
+        await copyText(path);
+        setScreenshotMessage(`Saved and path copied: ${path}`);
+      } catch (error) {
+        setScreenshotMessage(`Saved (path copy failed: ${String(error)}): ${path}`);
+      }
     } catch (error) {
       setScreenshotMessage(`Save failed: ${String(error)}`);
     } finally {
