@@ -206,6 +206,10 @@ export async function loadGameConfig(gameId: string): Promise<AnalysisStatus> {
   return invoke<AnalysisStatus>("load_game_config", { gameId });
 }
 
+export async function saveGameScreenshot(frame: FrameBytes): Promise<string> {
+  return invoke<string>("save_game_screenshot", { jpeg: Array.from(frame) });
+}
+
 export async function configureAnalysis(config: AnalysisConfig): Promise<AnalysisStatus> {
   return invoke<AnalysisStatus>("configure_analysis", { config });
 }

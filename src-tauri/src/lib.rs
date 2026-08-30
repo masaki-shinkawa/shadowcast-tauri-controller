@@ -42,6 +42,7 @@ pub fn run() {
             analysis::configure_analysis,
             analysis::set_analysis_template,
             analysis::load_game_config,
+            analysis::save_game_screenshot,
         ])
         .run(tauri::generate_context!())
         .expect("error while running ShadowCast Controller");

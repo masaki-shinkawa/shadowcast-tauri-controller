@@ -7,6 +7,7 @@ use std::{
 
 use image::RgbImage;
 use serde::{Deserialize, Serialize};
+use tauri::Manager;
 use tracing::{info, warn};
 
 use crate::game_state::{
@@ -515,6 +516,38 @@ pub fn load_game_config(
     manager.load_game(&game_id)
 }
 
+#[tauri::command]
+pub fn save_game_screenshot(
+    app: tauri::AppHandle,
+    manager: tauri::State<'_, AnalysisManager>,
+    jpeg: Vec<u8>,
+) -> Result<String, String> {
+    const MAX_SCREENSHOT_BYTES: usize = 20 * 1024 * 1024;
+    if jpeg.len() < 4 || jpeg.len() > MAX_SCREENSHOT_BYTES || !jpeg.starts_with(&[0xff, 0xd8, 0xff])
+    {
+        return Err("Screenshot must be a valid JPEG frame smaller than 20 MiB".to_owned());
+    }
+
+    let status = manager.status();
+    let directory = app
+        .path()
+        .picture_dir()
+        .map_err(|error| format!("Failed to locate the Pictures directory: {error}"))?
+        .join("ShadowCast Captures");
+    std::fs::create_dir_all(&directory)
+        .map_err(|error| format!("Failed to create {}: {error}", directory.display()))?;
+    let filename = format!(
+        "{}-{}-{}.jpg",
+        sanitize_filename_part(&status.scene_detection.game_id),
+        sanitize_filename_part(&status.scene_detection.scene_id),
+        unix_time_ms()
+    );
+    let path = directory.join(filename);
+    std::fs::write(&path, jpeg)
+        .map_err(|error| format!("Failed to save {}: {error}", path.display()))?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
 fn run_analysis_worker(
     queue: Arc<LatestFrameQueue>,
     status: Arc<Mutex<AnalysisStatus>>,
@@ -914,6 +947,19 @@ fn unix_time_ms() -> u64 {
         .as_millis() as u64
 }
 
+fn sanitize_filename_part(value: &str) -> String {
+    value
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '-' | '_') {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use image::{Rgb, RgbImage};
@@ -1085,6 +1131,11 @@ mod tests {
             grayscale: vec![0; 3],
         };
         assert!(AnalysisTemplate::try_from(invalid_template).is_err());
+    }
+
+    #[test]
+    fn screenshot_filename_parts_cannot_create_paths() {
+        assert_eq!(sanitize_filename_part("title/result:1"), "title_result_1");
     }
 
     #[test]

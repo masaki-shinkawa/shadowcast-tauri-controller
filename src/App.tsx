@@ -12,6 +12,7 @@ import {
   getCaptureStatus,
   type PreviewMetrics,
   reportPreviewMetrics,
+  saveGameScreenshot,
   setTelemetryEnabled,
   startCapture,
   stopCapture,
@@ -78,7 +79,11 @@ export default function App() {
   const [analysisStatus, setAnalysisStatus] = useState<AnalysisStatus>(INITIAL_ANALYSIS_STATUS);
   const [busy, setBusy] = useState(false);
   const [telemetryBusy, setTelemetryBusy] = useState(false);
+  const [screenshotBusy, setScreenshotBusy] = useState(false);
+  const [screenshotAvailable, setScreenshotAvailable] = useState(false);
+  const [screenshotMessage, setScreenshotMessage] = useState<string | null>(null);
   const frameListeners = useRef(new Set<FrameListener>());
+  const latestFrame = useRef<FrameBytes | null>(null);
 
   const subscribe = useCallback((listener: FrameListener) => {
     frameListeners.current.add(listener);
@@ -86,6 +91,8 @@ export default function App() {
   }, []);
 
   const broadcastFrame = useCallback((frame: FrameBytes) => {
+    latestFrame.current = frame;
+    setScreenshotAvailable(true);
     for (const listener of frameListeners.current) listener(frame);
   }, []);
 
@@ -118,6 +125,9 @@ export default function App() {
   const handleStart = async () => {
     setBusy(true);
     setPreviewMetrics(EMPTY_PREVIEW_METRICS);
+    latestFrame.current = null;
+    setScreenshotAvailable(false);
+    setScreenshotMessage(null);
     setStatus((current) => ({ ...current, state: "starting", error: null }));
     try {
       setStatus(await startCapture(broadcastFrame));
@@ -148,6 +158,21 @@ export default function App() {
       setStatus((current) => ({ ...current, error: String(error) }));
     } finally {
       setTelemetryBusy(false);
+    }
+  };
+
+  const handleScreenshot = async () => {
+    const frame = latestFrame.current;
+    if (!frame) return;
+    setScreenshotBusy(true);
+    setScreenshotMessage(null);
+    try {
+      const path = await saveGameScreenshot(frame);
+      setScreenshotMessage(`Saved: ${path}`);
+    } catch (error) {
+      setScreenshotMessage(`Save failed: ${String(error)}`);
+    } finally {
+      setScreenshotBusy(false);
     }
   };
 
@@ -193,6 +218,10 @@ export default function App() {
           busy={busy}
           onStart={() => void handleStart()}
           onStop={() => void handleStop()}
+          screenshotBusy={screenshotBusy}
+          screenshotAvailable={screenshotAvailable}
+          screenshotMessage={screenshotMessage}
+          onScreenshot={() => void handleScreenshot()}
         />
         <p>1280 × 720 · 60 FPS · MJPEG preferred</p>
       </footer>
