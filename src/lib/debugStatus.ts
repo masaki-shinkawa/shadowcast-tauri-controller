@@ -34,6 +34,18 @@ export function formatCaptureDebugStatus(
     `Analysis FPS: ${analysis.measuredFps.toFixed(1)}`,
     `Analysis / submit: ${analysis.averageAnalysisMs.toFixed(2)} / ${capture.averageAnalysisSubmitMs.toFixed(3)} ms`,
     `Analysis enabled / max FPS: ${analysis.config.enabled} / ${analysis.config.maxFps}`,
+    `Game / scene: ${analysis.sceneDetection.gameId} / ${analysis.sceneDetection.sceneId}`,
+    `Scene confidence / consecutive frames: ${analysis.sceneDetection.confidence.toFixed(4)} / ${analysis.sceneDetection.consecutiveFrames}`,
+    `Scene evidence: ${
+      analysis.sceneDetection.evidence.length > 0
+        ? analysis.sceneDetection.evidence
+            .map(
+              (item) =>
+                `${item.detectorType}: ${item.observed.toFixed(4)} (${item.expected}) ${item.matched ? "match" : "miss"}`,
+            )
+            .join("; ")
+        : "none"
+    }`,
     `Analysis frames (submitted / analyzed / dropped / failed): ${formatInteger(analysis.submittedFrames)} / ${formatInteger(analysis.analyzedFrames)} / ${formatInteger(analysis.droppedFrames)} / ${formatInteger(analysis.failedFrames)}`,
     `Analysis queue delay (latest): ${result ? `${result.queueDelayMs.toFixed(2)} ms` : "-"}`,
     `Analysis time (latest): ${result ? `${result.analysisMs.toFixed(2)} ms` : "-"}`,

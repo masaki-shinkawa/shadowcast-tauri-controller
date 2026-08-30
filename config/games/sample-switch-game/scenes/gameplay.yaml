@@ -1,0 +1,8 @@
+id: gameplay
+priority: 200
+detectors:
+  - type: color_ratio
+    region: [480, 300, 320, 120]
+    target: [0, 255, 0]
+    tolerance: 48
+    min_ratio: 0.20

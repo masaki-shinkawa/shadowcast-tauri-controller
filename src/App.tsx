@@ -51,23 +51,24 @@ const INITIAL_ANALYSIS_STATUS: AnalysisStatus = {
   measuredFps: 0,
   averageAnalysisMs: 0,
   lastResult: null,
-  gameStateProfile: {
-    name: "generic-switch-game-v1",
-    confirmationFrames: 3,
-    timeoutMs: 2000,
-    loadingLumaMax: 24,
-    gameplayColorRatioMinPercent: 20,
-    resultTemplateScoreMinPercent: 90,
+  gameProfile: {
+    gameId: "sample-switch-game",
+    gameName: "Sample Switch Game",
+    resolution: [1280, 720],
+    scenes: [],
   },
-  gameState: {
-    state: "unknown",
+  sceneDetection: {
+    gameId: "sample-switch-game",
+    sceneId: "unknown",
     confidence: 0,
     detectedAtMs: 0,
     frameNumber: 0,
-    reason: "",
+    evidence: [],
     consecutiveFrames: 0,
+    candidateSceneId: null,
+    candidateConsecutiveFrames: 0,
   },
-  stateTransitions: [],
+  sceneTransitions: [],
   error: null,
 };
 

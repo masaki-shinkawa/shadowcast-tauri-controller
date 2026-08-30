@@ -75,10 +75,10 @@ cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 
 構造化結果、設定API、OpenCV導入方式、性能確認方法は[リアルタイム画像解析基盤](docs/image-analysis.md)を参照してください。
 
-解析結果は `generic-switch-game-v1` プロファイルで `loading`、`gameplay`、`result`、`unknown` の状態に変換されます。3 フレーム連続確認、2 秒のタイムアウト、信頼度・検出時刻・判定根拠を含む直近50件の遷移ログを備えています。判定基準、OCRとの比較、評価fixtureは[ゲーム状態判定](docs/game-state-detection.md)を参照してください。
+解析結果は `config/games/<game-id>` の YAML 定義に従ってシーンへ変換されます。初期 fixture は `loading`、`gameplay`、`result` の3シーンを持ち、未一致を `unknown` とします。連続フレーム確認、タイムアウト、ゲームID・信頼度・検出時刻・検出器別根拠を含む直近50件の遷移ログを備えています。設定形式、OCRとの比較、評価方法は[ゲームシーン判定](docs/game-state-detection.md)を参照してください。
 
 ## MVPの範囲
 
 実装済み: デバイス検出、フォーマット列挙・選択、Start / Stop、MJPEG転送、映像表示、解像度・FPS・フォーマット・フレーム数表示、最新フレーム解析、ROI、色判定、テンプレートマッチング、tracingログ。
 
-未実装: OpenCVランタイム、AI/OCR、タイトル固有の状態プロファイル、自動操作、コントローラー/HID/Serial制御。
+未実装: OpenCVランタイム、AI/OCR、実タイトル向けの校正済み設定、自動操作、コントローラー/HID/Serial制御。

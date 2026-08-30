@@ -1,0 +1,6 @@
+id: sample-switch-game
+name: Sample Switch Game
+resolution: [1280, 720]
+defaults:
+  consecutive_frames: 3
+  timeout_ms: 2000

@@ -1,4 +1,5 @@
 use std::{
+    path::{Path, PathBuf},
     sync::{Arc, Condvar, Mutex, MutexGuard},
     thread::{self, JoinHandle},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -9,7 +10,8 @@ use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
 use crate::game_state::{
-    GameSignals, GameStateDetector, GameStateProfile, GameStateSnapshot, GameStateTransition,
+    default_games_root, load_default_profile, GameProfile, GameProfileSummary, SceneDetection,
+    SceneDetector, SceneTransition,
 };
 
 const DEFAULT_MAX_FPS: u32 = 15;
@@ -140,17 +142,31 @@ pub struct AnalysisStatus {
     measured_fps: f64,
     average_analysis_ms: f64,
     last_result: Option<AnalysisResult>,
-    game_state_profile: GameStateProfile,
-    game_state: GameStateSnapshot,
-    state_transitions: Vec<GameStateTransition>,
+    game_profile: GameProfileSummary,
+    scene_detection: SceneDetection,
+    scene_transitions: Vec<SceneTransition>,
     error: Option<String>,
 }
 
 impl Default for AnalysisStatus {
     fn default() -> Self {
+        let profile = Arc::new(
+            load_default_profile(&default_games_root())
+                .expect("bundled sample game configuration must be valid"),
+        );
+        Self::for_profile(AnalysisState::Stopped, AnalysisConfig::default(), &profile)
+    }
+}
+
+impl AnalysisStatus {
+    fn for_profile(
+        state: AnalysisState,
+        config: AnalysisConfig,
+        profile: &Arc<GameProfile>,
+    ) -> Self {
         Self {
-            state: AnalysisState::Stopped,
-            config: AnalysisConfig::default(),
+            state,
+            config,
             submitted_frames: 0,
             analyzed_frames: 0,
             dropped_frames: 0,
@@ -158,9 +174,9 @@ impl Default for AnalysisStatus {
             measured_fps: 0.0,
             average_analysis_ms: 0.0,
             last_result: None,
-            game_state_profile: GameStateProfile::default(),
-            game_state: GameStateSnapshot::default(),
-            state_transitions: Vec::new(),
+            game_profile: profile.summary(),
+            scene_detection: SceneDetector::new(Arc::clone(profile)).snapshot(),
+            scene_transitions: Vec::new(),
             error: None,
         }
     }
@@ -257,16 +273,33 @@ pub struct AnalysisManager {
     status: Arc<Mutex<AnalysisStatus>>,
     config: Arc<Mutex<AnalysisConfig>>,
     template: Arc<Mutex<Option<AnalysisTemplate>>>,
+    games_root: PathBuf,
+    game_profile: Arc<Mutex<Arc<GameProfile>>>,
 }
 
 impl Default for AnalysisManager {
     fn default() -> Self {
-        Self {
+        Self::from_games_root(default_games_root())
+            .expect("bundled sample game configuration must be valid")
+    }
+}
+
+impl AnalysisManager {
+    pub fn from_games_root(games_root: impl AsRef<Path>) -> Result<Self, String> {
+        let games_root = games_root.as_ref().to_path_buf();
+        let profile = Arc::new(load_default_profile(&games_root)?);
+        Ok(Self {
             active: Mutex::new(None),
-            status: Arc::new(Mutex::new(AnalysisStatus::default())),
+            status: Arc::new(Mutex::new(AnalysisStatus::for_profile(
+                AnalysisState::Stopped,
+                AnalysisConfig::default(),
+                &profile,
+            ))),
             config: Arc::new(Mutex::new(AnalysisConfig::default())),
             template: Arc::new(Mutex::new(None)),
-        }
+            games_root,
+            game_profile: Arc::new(Mutex::new(profile)),
+        })
     }
 }
 
@@ -311,19 +344,23 @@ impl AnalysisManager {
         let thread_status = Arc::clone(&self.status);
         let thread_config = Arc::clone(&self.config);
         let thread_template = Arc::clone(&self.template);
+        let game_profile = Arc::clone(&lock(&self.game_profile));
         let initial_config = lock(&self.config).clone();
         update_status(&self.status, |status| {
-            *status = AnalysisStatus {
-                state: AnalysisState::Running,
-                config: initial_config,
-                ..AnalysisStatus::default()
-            };
+            *status =
+                AnalysisStatus::for_profile(AnalysisState::Running, initial_config, &game_profile);
         });
 
         let worker = thread::Builder::new()
             .name("shadowcast-analysis".to_owned())
             .spawn(move || {
-                run_analysis_worker(thread_queue, thread_status, thread_config, thread_template);
+                run_analysis_worker(
+                    thread_queue,
+                    thread_status,
+                    thread_config,
+                    thread_template,
+                    game_profile,
+                );
             })
             .map_err(|error| {
                 let message = format!("Failed to spawn analysis worker: {error}");
@@ -393,6 +430,22 @@ impl AnalysisManager {
         *current_template = template;
         Ok(())
     }
+
+    fn load_game(&self, game_id: &str) -> Result<AnalysisStatus, String> {
+        if lock(&self.active)
+            .as_ref()
+            .is_some_and(|active| !active.thread.is_finished())
+        {
+            return Err("Stop capture before changing the game configuration".to_owned());
+        }
+        let profile = Arc::new(GameProfile::load(&self.games_root, game_id)?);
+        *lock(&self.game_profile) = Arc::clone(&profile);
+        let config = lock(&self.config).clone();
+        update_status(&self.status, |status| {
+            *status = AnalysisStatus::for_profile(AnalysisState::Stopped, config, &profile);
+        });
+        Ok(self.status())
+    }
 }
 
 impl Drop for AnalysisManager {
@@ -454,11 +507,20 @@ pub fn set_analysis_template(
     manager.set_template(template)
 }
 
+#[tauri::command]
+pub fn load_game_config(
+    manager: tauri::State<'_, AnalysisManager>,
+    game_id: String,
+) -> Result<AnalysisStatus, String> {
+    manager.load_game(&game_id)
+}
+
 fn run_analysis_worker(
     queue: Arc<LatestFrameQueue>,
     status: Arc<Mutex<AnalysisStatus>>,
     config: Arc<Mutex<AnalysisConfig>>,
     template: Arc<Mutex<Option<AnalysisTemplate>>>,
+    game_profile: Arc<GameProfile>,
 ) {
     info!("analysis worker started");
     let mut next_allowed = Instant::now();
@@ -466,23 +528,23 @@ fn run_analysis_worker(
     let mut interval_frames = 0_u64;
     let mut total_analysis_time = Duration::ZERO;
     let detector_started = Instant::now();
-    let mut state_detector = GameStateDetector::default();
+    let mut scene_detector = SceneDetector::new(Arc::clone(&game_profile));
     let mut last_frame_number = 0;
 
     loop {
         let frame = match queue.take_after(next_allowed, STATE_WATCHDOG_INTERVAL) {
             QueueTake::Frame(frame) => frame,
             QueueTake::Idle => {
-                let transition = state_detector.advance_time(
+                let transition = scene_detector.advance_time(
                     last_frame_number,
                     unix_time_ms(),
                     detector_started.elapsed().as_millis() as u64,
                 );
-                log_state_transition(transition.as_ref());
+                log_scene_transition(transition.as_ref());
                 if transition.is_some() {
                     update_status(&status, |analysis_status| {
-                        analysis_status.game_state = state_detector.snapshot();
-                        record_state_transition(analysis_status, transition);
+                        analysis_status.scene_detection = scene_detector.snapshot();
+                        record_scene_transition(analysis_status, transition);
                     });
                 }
                 continue;
@@ -506,23 +568,30 @@ fn run_analysis_worker(
             &current_config,
             current_template.as_ref(),
         ) {
-            Ok(mut result) => {
+            Ok((mut result, image)) => {
                 result.queue_delay_ms = queue_delay.as_secs_f64() * 1_000.0;
-                let transition = state_detector.observe(
-                    GameSignals {
-                        average_rgb: [
-                            result.color.average.red,
-                            result.color.average.green,
-                            result.color.average.blue,
-                        ],
-                        target_color_ratio: result.color.match_ratio,
-                        template_score: result.template_match.as_ref().map(|item| item.score),
-                    },
+                let (transition, scene_error) = match scene_detector.observe(
+                    &image,
                     result.frame_number,
                     unix_time_ms(),
                     detector_started.elapsed().as_millis() as u64,
-                );
-                log_state_transition(transition.as_ref());
+                ) {
+                    Ok(transition) => (transition, None),
+                    Err(message) => {
+                        warn!(error = %message, frame_number = frame.number, "scene detection failed");
+                        let transition = scene_detector.observe_unavailable(
+                            frame.number,
+                            unix_time_ms(),
+                            detector_started.elapsed().as_millis() as u64,
+                        );
+                        update_status(&status, |analysis_status| {
+                            analysis_status.failed_frames += 1;
+                            analysis_status.error = Some(message.clone());
+                        });
+                        (transition, Some(message))
+                    }
+                };
+                log_scene_transition(transition.as_ref());
                 let elapsed = started.elapsed();
                 result.analysis_ms = elapsed.as_secs_f64() * 1_000.0;
                 total_analysis_time += elapsed;
@@ -542,22 +611,23 @@ fn run_analysis_worker(
                     total_analysis_time,
                     measured_fps,
                     result,
-                    state_detector.snapshot(),
+                    scene_detector.snapshot(),
                     transition,
+                    scene_error,
                 );
             }
             Err(message) => {
                 warn!(error = %message, frame_number = frame.number, "frame analysis failed");
-                let transition = state_detector.observe_unavailable(
+                let transition = scene_detector.observe_unavailable(
                     frame.number,
                     unix_time_ms(),
                     detector_started.elapsed().as_millis() as u64,
                 );
-                log_state_transition(transition.as_ref());
+                log_scene_transition(transition.as_ref());
                 update_status(&status, |analysis_status| {
                     analysis_status.failed_frames += 1;
-                    analysis_status.game_state = state_detector.snapshot();
-                    record_state_transition(analysis_status, transition);
+                    analysis_status.scene_detection = scene_detector.snapshot();
+                    record_scene_transition(analysis_status, transition);
                     analysis_status.error = Some(message);
                 });
             }
@@ -572,7 +642,7 @@ fn run_analysis_worker(
             analysis_status.state = AnalysisState::Stopped;
             analysis_status.measured_fps = 0.0;
         }
-        analysis_status.game_state = GameStateSnapshot::default();
+        analysis_status.scene_detection = SceneDetector::new(game_profile).snapshot();
     });
     info!("analysis worker stopped");
 }
@@ -582,8 +652,9 @@ fn record_analysis_success(
     total_analysis_time: Duration,
     measured_fps: Option<f64>,
     result: AnalysisResult,
-    game_state: GameStateSnapshot,
-    transition: Option<GameStateTransition>,
+    scene_detection: SceneDetection,
+    transition: Option<SceneTransition>,
+    error: Option<String>,
 ) {
     update_status(status, |analysis_status| {
         analysis_status.analyzed_frames += 1;
@@ -597,9 +668,9 @@ fn record_analysis_success(
             analysis_status.measured_fps = 0.0;
         }
         analysis_status.last_result = Some(result);
-        analysis_status.game_state = game_state;
-        record_state_transition(analysis_status, transition);
-        analysis_status.error = None;
+        analysis_status.scene_detection = scene_detection;
+        record_scene_transition(analysis_status, transition);
+        analysis_status.error = error;
     });
 }
 
@@ -608,7 +679,7 @@ fn analyze_jpeg(
     frame_number: u64,
     config: &AnalysisConfig,
     template: Option<&AnalysisTemplate>,
-) -> Result<AnalysisResult, String> {
+) -> Result<(AnalysisResult, RgbImage), String> {
     let decode_started = Instant::now();
     let image = image::load_from_memory(jpeg)
         .map_err(|error| format!("Failed to decode analysis frame: {error}"))?
@@ -616,7 +687,7 @@ fn analyze_jpeg(
     let jpeg_decode_ms = decode_started.elapsed().as_secs_f64() * 1_000.0;
     let mut result = analyze_rgb(&image, frame_number, config, template)?;
     result.jpeg_decode_ms = jpeg_decode_ms;
-    Ok(result)
+    Ok((result, image))
 }
 
 fn analyze_rgb(
@@ -812,24 +883,26 @@ fn update_status(status: &Arc<Mutex<AnalysisStatus>>, update: impl FnOnce(&mut A
     update(&mut lock(status));
 }
 
-fn log_state_transition(transition: Option<&GameStateTransition>) {
+fn log_scene_transition(transition: Option<&SceneTransition>) {
     if let Some(event) = transition {
         info!(
-            from = ?event.from,
-            to = ?event.to,
-            confidence = event.confidence,
-            frame_number = event.frame_number,
+            game_id = %event.detection.game_id,
+            from = %event.from_scene_id,
+            to = %event.detection.scene_id,
+            confidence = event.detection.confidence,
+            frame_number = event.detection.frame_number,
+            evidence = ?event.detection.evidence,
             reason = %event.reason,
-            "game state transitioned"
+            "game scene transitioned"
         );
     }
 }
 
-fn record_state_transition(status: &mut AnalysisStatus, transition: Option<GameStateTransition>) {
+fn record_scene_transition(status: &mut AnalysisStatus, transition: Option<SceneTransition>) {
     if let Some(event) = transition {
-        status.state_transitions.push(event);
-        if status.state_transitions.len() > MAX_STATE_TRANSITIONS {
-            status.state_transitions.remove(0);
+        status.scene_transitions.push(event);
+        if status.scene_transitions.len() > MAX_STATE_TRANSITIONS {
+            status.scene_transitions.remove(0);
         }
     }
 }
@@ -985,21 +1058,17 @@ mod tests {
     }
 
     #[test]
-    fn stopping_analysis_clears_the_current_game_state() {
+    fn stopping_analysis_clears_the_current_scene() {
         let manager = AnalysisManager::default();
         let _input = manager.start().expect("analysis worker should start");
         update_status(&manager.status, |status| {
-            status.game_state.state = crate::game_state::GameState::Gameplay;
-            status.game_state.confidence = 0.8;
+            status.scene_detection.scene_id = "gameplay".to_owned();
+            status.scene_detection.confidence = 0.8;
         });
 
         manager.stop();
 
-        assert_eq!(
-            manager.status().game_state,
-            GameStateSnapshot::default(),
-            "a stopped capture must not expose an actionable game state"
-        );
+        assert_eq!(manager.status().scene_detection.scene_id, "unknown");
     }
 
     #[test]
@@ -1081,7 +1150,8 @@ mod tests {
             Duration::from_millis(2),
             Some(15.0),
             result,
-            GameStateSnapshot::default(),
+            AnalysisManager::default().status().scene_detection,
+            None,
             None,
         );
 

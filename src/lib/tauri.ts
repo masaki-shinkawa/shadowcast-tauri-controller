@@ -83,38 +83,56 @@ export interface AnalysisStatus {
   measuredFps: number;
   averageAnalysisMs: number;
   lastResult: AnalysisResult | null;
-  gameStateProfile: GameStateProfile;
-  gameState: GameStateSnapshot;
-  stateTransitions: GameStateTransition[];
+  gameProfile: GameProfileSummary;
+  sceneDetection: SceneDetection;
+  sceneTransitions: SceneTransition[];
   error: string | null;
 }
 
-export type GameState = "unknown" | "loading" | "gameplay" | "result";
-
-export interface GameStateProfile {
-  name: string;
-  confirmationFrames: number;
-  timeoutMs: number;
-  loadingLumaMax: number;
-  gameplayColorRatioMinPercent: number;
-  resultTemplateScoreMinPercent: number;
-}
-
-export interface GameStateSnapshot {
-  state: GameState;
-  confidence: number;
-  detectedAtMs: number;
-  frameNumber: number;
-  reason: string;
+export interface StabilityConfig {
   consecutiveFrames: number;
+  timeoutMs: number;
 }
 
-export interface GameStateTransition {
-  from: GameState;
-  to: GameState;
+export interface SceneSummary {
+  id: string;
+  detectorCount: number;
+  combination: "all" | "any";
+  stability: StabilityConfig;
+}
+
+export interface GameProfileSummary {
+  gameId: string;
+  gameName: string;
+  resolution: [number, number];
+  scenes: SceneSummary[];
+}
+
+export interface DetectorEvidence {
+  detectorType: string;
+  matched: boolean;
+  confidence: number;
+  observed: number;
+  expected: string;
+  region: [number, number, number, number];
+  detail: string;
+}
+
+export interface SceneDetection {
+  gameId: string;
+  sceneId: string;
   confidence: number;
   detectedAtMs: number;
   frameNumber: number;
+  evidence: DetectorEvidence[];
+  consecutiveFrames: number;
+  candidateSceneId: string | null;
+  candidateConsecutiveFrames: number;
+}
+
+export interface SceneTransition {
+  fromSceneId: string;
+  detection: SceneDetection;
   reason: string;
 }
 
@@ -182,6 +200,10 @@ export async function reportPreviewMetrics(metrics: PreviewMetrics): Promise<voi
 
 export async function getAnalysisStatus(): Promise<AnalysisStatus> {
   return invoke<AnalysisStatus>("get_analysis_status");
+}
+
+export async function loadGameConfig(gameId: string): Promise<AnalysisStatus> {
+  return invoke<AnalysisStatus>("load_game_config", { gameId });
 }
 
 export async function configureAnalysis(config: AnalysisConfig): Promise<AnalysisStatus> {

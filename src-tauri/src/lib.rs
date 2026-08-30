@@ -4,6 +4,8 @@ mod game_state;
 
 use analysis::AnalysisManager;
 use capture::CaptureManager;
+use game_state::default_games_root;
+use tauri::{path::BaseDirectory, Manager};
 use tracing_subscriber::EnvFilter;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -12,7 +14,24 @@ pub fn run() {
 
     tauri::Builder::default()
         .manage(CaptureManager::default())
-        .manage(AnalysisManager::default())
+        .setup(|app| {
+            let bundled_root = app
+                .path()
+                .resolve("config/games", BaseDirectory::Resource)?;
+            let games_root = std::env::var_os("SHADOWCAST_GAME_CONFIG_ROOT")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| {
+                    if bundled_root.exists() {
+                        bundled_root
+                    } else {
+                        default_games_root()
+                    }
+                });
+            let analysis =
+                AnalysisManager::from_games_root(games_root).map_err(std::io::Error::other)?;
+            app.manage(analysis);
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             capture::start_capture,
             capture::stop_capture,
@@ -22,6 +41,7 @@ pub fn run() {
             analysis::get_analysis_status,
             analysis::configure_analysis,
             analysis::set_analysis_template,
+            analysis::load_game_config,
         ])
         .run(tauri::generate_context!())
         .expect("error while running ShadowCast Controller");

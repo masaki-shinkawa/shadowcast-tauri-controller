@@ -1,0 +1,12 @@
+id: result
+priority: 300
+combination: all
+detectors:
+  - type: template
+    image: assets/result-header.pgm
+    region: [600, 60, 80, 40]
+    threshold: 0.92
+  - type: edge_density
+    region: [600, 60, 4, 4]
+    difference_threshold: 80
+    min_ratio: 0.01

@@ -1,0 +1,9 @@
+id: loading
+priority: 100
+detectors:
+  - type: luma
+    region: [0, 0, 1280, 720]
+    max: 24
+stability:
+  consecutive_frames: 3
+  timeout_ms: 2000

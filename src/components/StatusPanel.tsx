@@ -96,13 +96,13 @@ export function StatusPanel({
         <div className="telemetry-row telemetry-row--split">
           <div>
             <dt>Game state</dt>
-            <dd className="accent-value">{analysisStatus.gameState.state}</dd>
+            <dd className="accent-value">{analysisStatus.sceneDetection.sceneId}</dd>
           </div>
           <div>
             <dt>Confidence / streak</dt>
             <dd>
-              {(analysisStatus.gameState.confidence * 100).toFixed(1)}% /{" "}
-              {analysisStatus.gameState.consecutiveFrames}
+              {(analysisStatus.sceneDetection.confidence * 100).toFixed(1)}% /{" "}
+              {analysisStatus.sceneDetection.consecutiveFrames}
             </dd>
           </div>
         </div>
@@ -213,8 +213,8 @@ export function StatusPanel({
         <div>
           <strong>Direct MSMF pipeline</strong>
           <p>
-            {analysisStatus.gameStateProfile.name} · {analysisStatus.config.maxFps} FPS ·{" "}
-            {analysisStatus.gameStateProfile.confirmationFrames}-frame confirmation
+            {analysisStatus.gameProfile.gameId} · {analysisStatus.config.maxFps} FPS ·{" "}
+            {analysisStatus.gameProfile.scenes.length} scenes
           </p>
         </div>
       </div>

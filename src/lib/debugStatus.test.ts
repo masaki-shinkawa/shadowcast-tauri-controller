@@ -63,6 +63,34 @@ const analysis: AnalysisStatus = {
     colorAnalysisMs: 17.1,
     templateMatchMs: 0,
   },
+  gameProfile: {
+    gameId: "sample-switch-game",
+    gameName: "Sample Switch Game",
+    resolution: [1280, 720],
+    scenes: [],
+  },
+  sceneDetection: {
+    gameId: "sample-switch-game",
+    sceneId: "gameplay",
+    confidence: 0.82,
+    detectedAtMs: 1_787_884_645_000,
+    frameNumber: 3579,
+    evidence: [
+      {
+        detectorType: "color_ratio",
+        matched: true,
+        confidence: 0.82,
+        observed: 0.82,
+        expected: ">= 0.200",
+        region: [480, 300, 320, 120],
+        detail: "31488/38400 pixels match",
+      },
+    ],
+    consecutiveFrames: 6,
+    candidateSceneId: "gameplay",
+    candidateConsecutiveFrames: 6,
+  },
+  sceneTransitions: [],
   error: null,
 };
 
@@ -85,6 +113,8 @@ describe("formatCaptureDebugStatus", () => {
       "Analysis frames (submitted / analyzed / dropped / failed): 3,627 / 369 / 3,258 / 0",
     );
     expect(text).toContain("Configured ROI: x=480, y=270, width=320, height=180");
+    expect(text).toContain("Game / scene: sample-switch-game / gameplay");
+    expect(text).toContain("Scene evidence: color_ratio: 0.8200 (>= 0.200)");
     expect(text).toContain("Capture error: none");
   });
 });

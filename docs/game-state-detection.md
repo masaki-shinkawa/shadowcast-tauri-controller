@@ -1,63 +1,95 @@
-# ゲーム状態判定
+# ゲームシーン判定
 
-## 対象
+## 設定構成
 
-初期プロファイル `generic-switch-game-v1` は、ShadowCast から取得する 1280 × 720 の Nintendo Switch ゲーム映像を対象にします。特定タイトルの言語やフォントに依存せず、次の画面状態を判定します。
-
-| 状態 | 判定対象 | 既定の根拠 |
-| --- | --- | --- |
-| `loading` | 暗転・ロード画面 | ROI の平均輝度が 24 以下 |
-| `gameplay` | 操作可能な通常画面 | 設定色が ROI の 20% 以上 |
-| `result` | リザルト・完了画面 | 登録テンプレートの一致度が 0.90 以上 |
-| `unknown` | 上記以外、または判定不能 | 確定済み状態を 2 秒間再確認できない |
-
-`gameplay` の対象色と ROI は `configure_analysis`、`result` のテンプレートは `set_analysis_template` でタイトルごとに設定します。初期プロファイルは状態判定パイプラインを安全に評価するための共通基準です。実際の自動操作を開始する前に、対象タイトル・解像度・表示言語ごとのサンプルで ROI、色、テンプレートを校正してください。
-
-## 手法の比較
-
-| 手法 | 採否 | 長所 | 注意点 |
-| --- | --- | --- | --- |
-| 色・輝度判定 | 採用 | 高速で暗転や固定色 UI に強い | 演出や明るさ設定による変化を受ける |
-| テンプレートマッチング | 採用 | アイコンや固定形状の根拠を位置・スコア付きで残せる | 解像度、UI スケール、言語差ごとにテンプレートが必要 |
-| OCR | 初期プロファイルでは不採用 | 可変文字列や複数言語の画面に適する | OCR ランタイム、言語データ、前処理が必要で、短い固定ラベルには過剰 |
-
-リザルト画面は固定アイコンのテンプレート一致を優先し、暗転判定、対象色判定の順で評価します。同じフレームで複数条件を満たしても優先順位が一定なので、結果を再現できます。文字列そのものが操作条件になるタイトルでは、タイトル固有プロファイルとして OCR を追加します。
-
-## 安定化とタイムアウト
-
-候補状態が 3 フレーム連続した時点で確定します。途中に不一致または別状態が入ると連続数は 1 から数え直すため、単発ノイズでは遷移しません。
-
-確定済み状態と異なる候補、不一致、解析失敗が続いた場合、直ちに状態を変更せず最大 2 秒間保持します。別状態が 3 フレーム連続すればその状態へ遷移し、候補が揺れるなど確定済み状態を 2 秒間再確認できなければ `unknown` へ遷移します。自動操作側は `unknown` を入力停止条件として扱えます。
-
-映像フレームが届かない場合も監視タイマーを進め、解析ワーカーが停止した時点では現在状態を `unknown` に戻します。停止後や入力断の間に、直前の `gameplay` を現在状態として公開し続けることはありません。
-
-## 状態モデルとログ
-
-`get_analysis_status` は次を返します。
-
-- `gameStateProfile`: 使用中のプロファイル名と全閾値
-- `gameState`: `state`、0〜1 の `confidence`、Unix epoch ミリ秒の `detectedAtMs`、`frameNumber`、`reason`、`consecutiveFrames`
-- `stateTransitions`: 直近 50 件の遷移。遷移元・遷移先、信頼度、検出時刻、フレーム番号、判定根拠を保持
-
-状態遷移は同じ情報を `tracing` の `game state transitioned` イベントとして出力します。例:
+ゲーム、シーン、操作、シナリオは役割を分離します。Issue #5 が読み込むのは `game.yaml` と `scenes/*.yaml` です。`actions/` と `scenarios/` は #6・#7 で追加します。
 
 ```text
-game state transitioned from=Unknown to=Gameplay confidence=0.73 frame_number=128 reason="target color ratio 0.730 >= 0.20"
+config/games/<game-id>/
+├─ game.yaml
+├─ assets/
+└─ scenes/
+   ├─ loading.yaml
+   ├─ gameplay.yaml
+   └─ result.yaml
 ```
 
-## 再現可能な評価
+初期 fixture は `sample-switch-game` です。1280 × 720 のフレームを対象に、`loading`、`gameplay`、`result` の3シーンを定義しています。これは設定読込と判定を再現するための基準であり、特定タイトルでそのまま使用する設定ではありません。対象タイトルごとにディレクトリを追加し、正解ラベル付き画像で校正してください。
 
-`game_state::tests::fixture_samples_are_classified_without_false_positives` は固定信号 fixture を使用します。
+起動時は `sample-switch-game` を読み込みます。別ゲームへ切り替える #7 向けインターフェースは次の Tauri command です。キャプチャ中の切り替えは拒否されます。
 
-- 正例 3 件: `loading`、`gameplay`、`result` を各 1 件、検出率 3/3
-- 負例 3 件: 各閾値未満または無関係な信号、誤検出 0/3
-- 安定化: 1 フレームのノイズで確定しないこと、3 連続フレームで確定することを個別テスト
-- タイムアウト: 最終確定状態を保持し、2 秒経過時だけ `unknown` へ戻ることを個別テスト
+```ts
+await invoke("load_game_config", { gameId: "my-game" });
+```
 
-実行方法:
+開発時の既定ルートは `config/games` です。`SHADOWCAST_GAME_CONFIG_ROOT` 環境変数で差し替えられ、配布時は同ディレクトリが Tauri resource として同梱されます。
+
+## シーン定義
+
+```yaml
+id: result
+priority: 300
+combination: all
+detectors:
+  - type: template
+    image: assets/result-header.pgm
+    region: [600, 60, 80, 40]
+    threshold: 0.92
+  - type: edge_density
+    region: [600, 60, 80, 40]
+    difference_threshold: 80
+    min_ratio: 0.01
+stability:
+  consecutive_frames: 3
+  timeout_ms: 2000
+```
+
+`combination` は `all` または `any`、`priority` は複数シーンが一致した場合の優先順位です。同じ優先順位では信頼度、シーンIDの順で決定するため、結果は再現可能です。シーンの `stability` を省略すると `game.yaml` の既定値を使用します。
+
+読み込み時にゲームID、重複シーンID、解像度、ROI、閾値、テンプレートの存在と配置を検証します。`unknown` は予約IDです。テンプレートのパスはゲームディレクトリ外へ出られません。
+
+## 検出方式
+
+| 方式 | 設定 type | 用途 | 注意点 |
+| --- | --- | --- | --- |
+| 輝度 | `luma` | 暗転、ロード画面 | 演出や明るさ設定の影響を受ける |
+| 色比率 | `color_ratio` | 固定色のUI、ゲージ | 色補正やHDR設定ごとに校正が必要 |
+| テンプレート | `template` | 固定アイコン、固定形状 | 解像度、UIスケール、言語差ごとの画像が必要 |
+| 形状 | `edge_density` | 輪郭の多い固定領域 | 動画や細かい背景でも上がるため単独利用を避ける |
+| OCR | 未採用 | 可変文字列、複数画面の共通ラベル | OCRランタイム、言語データ、前処理が必要 |
+
+初期構成では高速で依存の少ない4方式を採用しました。OCRは固定ラベルに対してテンプレートより配布サイズと運用負荷が大きく、誤読文字列を信頼度へ変換する校正もタイトル・言語ごとに必要なため未採用です。文字列そのものを操作条件にするゲームでは `ocr` 検出器を追加し、同じ `DetectorEvidence` へ正規化してから利用します。
+
+## 判定結果とログ
+
+`get_analysis_status` の `sceneDetection` は #7 が参照する共通モデルです。
+
+- `gameId`、`sceneId`
+- 0〜1 の `confidence`
+- Unix epoch ミリ秒の `detectedAtMs`
+- `frameNumber`
+- 検出器ごとの `evidence`（方式、一致可否、信頼度、観測値、閾値、ROI、詳細）
+- `consecutiveFrames`
+- 確定前候補と連続数
+
+一致するシーンがない画面は `unknown` のままです。確定済みシーンと異なる状態が続いた場合は、設定されたタイムアウト後に `unknown` へ遷移します。候補シーンは指定フレーム数だけ連続一致するまで確定しません。映像停止や解析失敗もタイムアウト対象です。
+
+`sceneTransitions` は直近50件を保持します。各遷移は同じ判定結果と理由を `game scene transitioned` の `tracing` イベントにも記録するため、使用した検出器まで追跡できます。
+
+## 評価
+
+テストは次を固定 fixture で確認します。
+
+- 1ゲーム3シーンを YAML から読み込める
+- 設定色の正例を `gameplay` として根拠付きで分類できる
+- 全条件の負例を既知シーンへ分類しない
+- 単発ノイズで連続確認がリセットされる
+- 3フレーム連続で確定する
+- フレーム停止・解析不能から2秒で `unknown` へ戻る
+- パストラバーサルを含む不正ゲームIDを拒否する
 
 ```powershell
 cargo test --manifest-path src-tauri/Cargo.toml game_state
 ```
 
-この fixture はアルゴリズムの境界値を再現するためのものです。実機での誤検出率を主張するものではありません。自動操作へ接続する前に、対象タイトルから状態ごとに連続フレームを採取し、正解ラベル付きデータで混同行列を記録してください。
+実ゲームへ適用する際は、状態ごとの連続フレームと `unknown` を含む評価画像を用意し、シーン別の適合率・再現率と混同行列を記録してください。
