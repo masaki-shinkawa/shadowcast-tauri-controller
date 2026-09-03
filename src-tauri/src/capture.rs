@@ -18,6 +18,7 @@ use tracing::{error, info};
 
 use self::worker::run_capture;
 use crate::analysis::AnalysisManager;
+use crate::scenario::ScenarioManager;
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -243,7 +244,9 @@ pub fn start_capture(
 pub fn stop_capture(
     manager: State<'_, CaptureManager>,
     analysis: State<'_, AnalysisManager>,
+    scenario: State<'_, ScenarioManager>,
 ) -> Result<CaptureStatus, String> {
+    scenario.stop();
     Ok(manager.stop(&analysis))
 }
 

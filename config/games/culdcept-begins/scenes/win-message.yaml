@@ -1,0 +1,11 @@
+id: win-message
+priority: 100
+detectors:
+  - type: template
+    image: assets/components/win-message.jpg
+    region: [450, 450, 380, 120]
+    threshold: 0.88
+  - type: template
+    image: assets/components/victory-text.jpg
+    region: [620, 490, 200, 70]
+    threshold: 0.88

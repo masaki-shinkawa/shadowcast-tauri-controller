@@ -1,0 +1,15 @@
+id: result-battle
+priority: 95
+detectors:
+  - type: luma
+    region: [20, 25, 360, 60]
+    min: 45
+  - type: color_ratio
+    region: [20, 25, 360, 60]
+    target: [170, 145, 55]
+    tolerance: 65
+    min_ratio: 0.065
+  - type: template
+    image: assets/components/result-yellow-next-button.jpg
+    region: [1100, 610, 180, 110]
+    threshold: 0.88

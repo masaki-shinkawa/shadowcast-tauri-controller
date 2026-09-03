@@ -1,0 +1,7 @@
+id: user-turn
+priority: 100
+detectors:
+  - type: template
+    image: assets/components/battle-ok-button.jpg
+    region: [550, 465, 180, 80]
+    threshold: 0.88

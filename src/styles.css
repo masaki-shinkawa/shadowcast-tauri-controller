@@ -282,6 +282,174 @@ h2 {
   gap: 8px;
 }
 
+.status-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  margin-top: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.status-tab {
+  position: relative;
+  padding: 10px 4px 12px;
+  border: 0;
+  color: #747e8a;
+  background: transparent;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+}
+
+.status-tab::after {
+  height: 2px;
+  position: absolute;
+  right: 6px;
+  bottom: -1px;
+  left: 6px;
+  background: transparent;
+  content: "";
+}
+
+.status-tab span {
+  min-width: 18px;
+  margin-left: 5px;
+  padding: 2px 5px;
+  display: inline-block;
+  border-radius: 999px;
+  color: #8e98a4;
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 8px;
+  letter-spacing: 0;
+}
+
+.status-tab:hover,
+.status-tab--active {
+  color: var(--green);
+}
+
+.status-tab--active::after {
+  background: var(--green);
+  box-shadow: 0 0 12px rgba(184, 255, 56, 0.35);
+}
+
+.status-tab--active span {
+  color: #111a07;
+  background: var(--green);
+}
+
+.system-log-panel {
+  padding-top: 14px;
+}
+
+.system-log-summary {
+  padding: 0 2px 10px;
+  display: flex;
+  justify-content: space-between;
+  color: #65707d;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 8px;
+  letter-spacing: 0.08em;
+}
+
+.system-log {
+  height: 470px;
+  overflow-y: auto;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 9px;
+  background: rgba(5, 7, 9, 0.48);
+  scrollbar-color: rgba(184, 255, 56, 0.28) transparent;
+  scrollbar-width: thin;
+}
+
+.system-log-entry {
+  padding: 12px 10px;
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  gap: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.055);
+  font-family: "SFMono-Regular", Consolas, monospace;
+}
+
+.system-log-entry:last-child {
+  border-bottom: 0;
+}
+
+.system-log-entry time {
+  padding-top: 2px;
+  color: #65707d;
+  font-size: 9px;
+}
+
+.system-log-entry > div {
+  min-width: 0;
+}
+
+.system-log-entry strong {
+  display: block;
+  overflow: hidden;
+  color: #e9ecef;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.system-log-entry p {
+  margin: 4px 0 0;
+  overflow: hidden;
+  color: #717c88;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.log-kind {
+  margin-bottom: 5px;
+  display: inline-block;
+  color: #8b96a3;
+  font-size: 8px;
+  letter-spacing: 0.08em;
+}
+
+.log-kind--game-state {
+  color: var(--green);
+}
+
+.log-kind--input {
+  color: #7cccff;
+}
+
+.system-log-empty {
+  height: 100%;
+  padding: 28px;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  color: #65707d;
+  text-align: center;
+}
+
+.system-log-empty > span {
+  color: var(--green);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  animation: pulse 1.2s step-end infinite;
+}
+
+.system-log-empty strong {
+  margin-top: 12px;
+  color: #aeb6bf;
+  font-size: 11px;
+}
+
+.system-log-empty p {
+  max-width: 190px;
+  margin: 6px 0 0;
+  color: #65707d;
+  font-size: 9px;
+  line-height: 1.55;
+}
+
 .telemetry-toggle {
   padding: 6px 9px;
   display: flex;
@@ -478,17 +646,631 @@ h2 {
   line-height: 1.5;
 }
 
+.diagnostics-path {
+  margin-top: 8px;
+  overflow: hidden;
+  color: #91c9ec;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.automation-progress {
+  margin-top: 18px;
+  padding: 18px 22px 20px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.2);
+}
+
+.automation-progress-heading {
+  padding-bottom: 18px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  border-bottom: 1px solid var(--line);
+}
+
+.automation-progress-status {
+  min-width: 190px;
+  display: grid;
+  grid-template-columns: auto auto;
+  align-items: center;
+  justify-content: end;
+  gap: 2px 10px;
+  text-align: right;
+  font-family: "SFMono-Regular", Consolas, monospace;
+}
+
+.automation-progress-status strong {
+  color: #dce1e6;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+}
+
+.automation-progress-status small {
+  grid-column: 1 / -1;
+  color: #68727e;
+  font-size: 8px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.automation-state {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  color: #818b97;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.automation-state i {
+  width: 6px;
+  height: 6px;
+  display: inline-block;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.automation-state--running,
+.automation-state--stopping {
+  color: var(--green);
+}
+
+.automation-state--running i,
+.automation-state--stopping i {
+  box-shadow: 0 0 10px rgba(184, 255, 56, 0.6);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+.automation-state--error {
+  color: #ff766c;
+}
+
+.automation-state--stopped {
+  color: #ffc94f;
+}
+
+.automation-state--completed {
+  color: #7cccff;
+}
+
+.automation-stepper {
+  margin: 0;
+  padding: 22px 2px 0;
+  display: grid;
+  grid-template-columns: repeat(8, minmax(66px, 1fr));
+  list-style: none;
+}
+
+.automation-step {
+  min-width: 0;
+  position: relative;
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  color: #5d6875;
+  text-align: center;
+}
+
+.automation-step:not(:last-child)::after {
+  height: 2px;
+  position: absolute;
+  z-index: 0;
+  top: 16px;
+  right: calc(-50% + 18px);
+  left: calc(50% + 18px);
+  background: rgba(255, 255, 255, 0.1);
+  content: "";
+}
+
+.automation-step--connector-passed:not(:last-child)::after {
+  background: rgba(184, 255, 56, 0.5);
+  box-shadow: 0 0 8px rgba(184, 255, 56, 0.16);
+}
+
+.automation-step-icon {
+  width: 34px;
+  height: 34px;
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 50%;
+  color: #7b8692;
+  background: #10151c;
+  box-shadow: 0 0 0 5px rgba(17, 22, 29, 0.98);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.automation-step-id {
+  margin-top: 9px;
+  color: #68727e;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 8px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.automation-step strong {
+  margin-top: 3px;
+  overflow: hidden;
+  color: #858f9a;
+  font-size: 10px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.automation-step small {
+  margin-top: 5px;
+  color: currentColor;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 7px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+}
+
+.automation-step--complete .automation-step-icon {
+  border-color: rgba(184, 255, 56, 0.5);
+  color: #152006;
+  background: var(--green);
+}
+
+.automation-step--complete strong {
+  color: #bac4b0;
+}
+
+.automation-step--active {
+  color: var(--green);
+}
+
+.automation-step--active .automation-step-icon {
+  border-color: var(--green);
+  color: var(--green);
+  box-shadow:
+    0 0 0 5px rgba(17, 22, 29, 0.98),
+    0 0 22px rgba(184, 255, 56, 0.36);
+  animation: active-step 1.6s ease-in-out infinite;
+}
+
+.automation-step--active .automation-step-id,
+.automation-step--active strong {
+  color: var(--green);
+}
+
+.automation-step--error {
+  color: #ff766c;
+}
+
+.automation-step--error .automation-step-icon {
+  border-color: #ff766c;
+  color: #1c0908;
+  background: #ff766c;
+  box-shadow:
+    0 0 0 5px rgba(17, 22, 29, 0.98),
+    0 0 20px rgba(255, 118, 108, 0.25);
+}
+
+.automation-step--error .automation-step-id,
+.automation-step--error strong {
+  color: #ff9b94;
+}
+
+.automation-step--stopped {
+  color: #ffc94f;
+}
+
+.automation-step--stopped .automation-step-icon {
+  border-color: rgba(255, 201, 79, 0.7);
+  color: #ffc94f;
+}
+
+.automation-step--stopped .automation-step-id,
+.automation-step--stopped strong {
+  color: #d8b96e;
+}
+
 .app-footer {
   min-height: 88px;
   justify-content: space-between;
   padding-top: 20px;
 }
 
+.controller-panel {
+  margin-top: 18px;
+  padding: 18px 20px 20px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.2);
+}
+
+.controller-heading,
+.controller-connection,
+.gamepad,
+.shoulder-row,
+.utility-row,
+.stick-click-row {
+  display: flex;
+  align-items: center;
+}
+
+.controller-heading {
+  justify-content: space-between;
+  gap: 20px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.controller-connection {
+  gap: 8px;
+}
+
+.controller-state {
+  min-width: 94px;
+  color: #808a96;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.controller-state i {
+  width: 6px;
+  height: 6px;
+  margin-right: 5px;
+  display: inline-block;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.controller-state--connected {
+  color: var(--green);
+}
+
+.controller-state--error {
+  color: #ff766c;
+}
+
+.controller-connection select,
+.controller-refresh,
+.controller-connect,
+.neutralize-button {
+  height: 34px;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 7px;
+  color: #c7cdd4;
+  background: #0c1117;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 10px;
+}
+
+.controller-connection select {
+  min-width: 88px;
+  padding: 0 28px 0 10px;
+}
+
+.controller-refresh,
+.controller-connect,
+.neutralize-button {
+  padding: 0 12px;
+  cursor: pointer;
+}
+
+.controller-connect {
+  border-color: rgba(184, 255, 56, 0.45);
+  color: #152006;
+  background: var(--green);
+  font-weight: 800;
+}
+
+.controller-connect--disconnect {
+  border-color: rgba(255, 118, 108, 0.3);
+  color: #ffaaa4;
+  background: rgba(255, 118, 108, 0.06);
+}
+
+.controller-connection button:disabled,
+.controller-connection select:disabled,
+.neutralize-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.gamepad {
+  min-height: 166px;
+  justify-content: center;
+  gap: clamp(18px, 3vw, 50px);
+  padding: 18px 10px 2px;
+  user-select: none;
+}
+
+.gamepad-side {
+  min-width: 158px;
+  align-self: stretch;
+}
+
+.shoulder-row {
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.pad-button {
+  width: 35px;
+  height: 35px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 50%;
+  color: #dce1e6;
+  background: linear-gradient(145deg, #222a34, #10151b);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+  touch-action: none;
+  transition: 80ms ease;
+}
+
+.pad-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.28;
+}
+
+.pad-button:not(:disabled):hover {
+  border-color: rgba(184, 255, 56, 0.55);
+  color: var(--green);
+}
+
+.pad-button--pressed,
+.pad-button--pressed:not(:disabled):hover {
+  border-color: var(--green);
+  color: #111a07;
+  background: var(--green);
+  box-shadow: 0 0 18px rgba(184, 255, 56, 0.28);
+  transform: translateY(2px) scale(0.96);
+}
+
+.shoulder-button {
+  width: 73px;
+  height: 28px;
+  border-radius: 8px;
+}
+
+.dpad,
+.face-buttons {
+  width: 116px;
+  height: 116px;
+  position: relative;
+  margin: 0 auto;
+  padding: 0;
+  border: 0;
+}
+
+.dpad .pad-button,
+.face-buttons .pad-button,
+.dpad-center {
+  position: absolute;
+}
+
+.dpad .pad-button {
+  width: 38px;
+  height: 38px;
+  border-radius: 7px;
+}
+
+.dpad-up,
+.face-x {
+  top: 0;
+  left: 39px;
+}
+
+.dpad-left,
+.face-y {
+  top: 39px;
+  left: 0;
+}
+
+.dpad-right,
+.face-a {
+  top: 39px;
+  right: 0;
+}
+
+.dpad-down,
+.face-b {
+  bottom: 0;
+  left: 39px;
+}
+
+.dpad-center {
+  width: 38px;
+  height: 38px;
+  top: 39px;
+  left: 39px;
+  border-radius: 5px;
+  background: #171e26;
+}
+
+.face-buttons .pad-button {
+  width: 38px;
+  height: 38px;
+}
+
+.face-a {
+  color: #ff8d87;
+}
+
+.face-b {
+  color: #ffd96d;
+}
+
+.face-x {
+  color: #83cfff;
+}
+
+.face-y {
+  color: #9be38b;
+}
+
+.analog-control {
+  width: 92px;
+  display: grid;
+  justify-items: center;
+  gap: 7px;
+  color: #6f7985;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 8px;
+  letter-spacing: 0.12em;
+}
+
+.analog-stick {
+  width: 88px;
+  height: 88px;
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(184, 255, 56, 0.22);
+  border-radius: 50%;
+  background: radial-gradient(circle, #161e26 0 30%, #0b1016 31% 100%);
+  cursor: grab;
+  margin: 0;
+  padding: 0;
+  touch-action: none;
+}
+
+.visually-hidden {
+  width: 1px;
+  height: 1px;
+  position: absolute;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.analog-stick:active {
+  cursor: grabbing;
+}
+
+.analog-stick--disabled {
+  cursor: not-allowed;
+  filter: grayscale(1);
+  opacity: 0.35;
+}
+
+.analog-axis {
+  position: absolute;
+  background: rgba(255, 255, 255, 0.07);
+  pointer-events: none;
+}
+
+.analog-axis--horizontal {
+  width: 100%;
+  height: 1px;
+  top: 50%;
+  left: 0;
+}
+
+.analog-axis--vertical {
+  width: 1px;
+  height: 100%;
+  top: 0;
+  left: 50%;
+}
+
+.analog-thumb {
+  width: 42px;
+  height: 42px;
+  position: absolute;
+  top: 22px;
+  left: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 50%;
+  background: radial-gradient(circle at 38% 34%, #39434e, #171d25 65%);
+  box-shadow: 0 5px 14px rgba(0, 0, 0, 0.48);
+  pointer-events: none;
+}
+
+.gamepad-center {
+  min-width: 172px;
+  align-self: center;
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+}
+
+.utility-row,
+.stick-click-row {
+  gap: 9px;
+}
+
+.utility-row .pad-button,
+.stick-click-row .pad-button {
+  width: 31px;
+  height: 31px;
+  font-size: 10px;
+}
+
+.stick-click-row .pad-button {
+  width: 52px;
+  border-radius: 15px;
+}
+
+.neutralize-button {
+  height: 28px;
+  color: #8c97a3;
+  background: transparent;
+}
+
+.neutralize-button:not(:disabled):hover {
+  border-color: rgba(255, 118, 108, 0.4);
+  color: #ff9b94;
+}
+
+.controller-error {
+  margin: 12px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 118, 108, 0.14);
+  color: #ff9b94;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 9px;
+}
+
 .controls {
+  flex-wrap: wrap;
   gap: 9px;
   margin: 0;
   padding: 0;
   border: 0;
+}
+
+.resume-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.resume-controls select {
+  min-height: 40px;
+  max-width: 190px;
+  padding: 0 9px;
+  border: 1px solid rgba(255, 201, 79, 0.35);
+  border-radius: 8px;
+  color: #ffe39d;
+  background: #0c1117;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 10px;
 }
 
 .control-button {
@@ -532,6 +1314,33 @@ h2 {
   color: #ff9b94;
 }
 
+.control-button--screenshot {
+  border: 1px solid rgba(124, 204, 255, 0.35);
+  color: #b9e4ff;
+  background: rgba(124, 204, 255, 0.06);
+}
+
+.control-button--screenshot:not(:disabled):hover {
+  border-color: rgba(124, 204, 255, 0.7);
+  background: rgba(124, 204, 255, 0.11);
+}
+
+.control-button--automation {
+  border: 1px solid rgba(255, 201, 79, 0.5);
+  color: #ffe39d;
+  background: rgba(255, 201, 79, 0.08);
+}
+
+.control-button--automation:not(:disabled):hover {
+  border-color: rgba(255, 201, 79, 0.85);
+  background: rgba(255, 201, 79, 0.14);
+}
+
+.automation-icon {
+  font-size: 16px;
+  line-height: 1;
+}
+
 .play-icon {
   width: 0;
   height: 0;
@@ -546,12 +1355,51 @@ h2 {
   border: 2px solid currentColor;
 }
 
+.camera-icon {
+  width: 13px;
+  height: 9px;
+  position: relative;
+  border: 2px solid currentColor;
+  border-radius: 2px;
+}
+
+.camera-icon::before {
+  width: 5px;
+  height: 2px;
+  position: absolute;
+  top: -4px;
+  left: 2px;
+  border: 1px solid currentColor;
+  border-bottom: 0;
+  content: "";
+}
+
+.camera-icon::after {
+  width: 3px;
+  height: 3px;
+  position: absolute;
+  top: 1px;
+  left: 3px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  content: "";
+}
+
 .working-indicator,
+.screenshot-message,
 .app-footer > p {
   color: #69727d;
   font-family: "SFMono-Regular", Consolas, monospace;
   font-size: 9px;
   letter-spacing: 0.08em;
+}
+
+.screenshot-message {
+  max-width: 360px;
+  overflow: hidden;
+  color: #91c9ec;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 @keyframes pulse {
@@ -567,11 +1415,30 @@ h2 {
   }
 }
 
+@keyframes active-step {
+  50% {
+    background: rgba(184, 255, 56, 0.1);
+    transform: scale(1.06);
+  }
+}
+
 @media (max-width: 980px) {
   .app-shell {
     padding-inline: 22px;
   }
   .workspace {
     grid-template-columns: minmax(0, 1fr) 270px;
+  }
+  .gamepad {
+    gap: 14px;
+  }
+  .gamepad-side {
+    min-width: 132px;
+  }
+  .automation-progress {
+    padding-inline: 16px;
+  }
+  .automation-step strong {
+    font-size: 9px;
   }
 }

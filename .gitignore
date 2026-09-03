@@ -5,3 +5,17 @@ src-tauri/gen/
 *.log
 artifacts/benchmarks/
 .DS_Store
+
+# Local authentication key (never commit).
+/.codex-phone-key.tmp
+
+# Keep only controller test records referenced by the setup guide.
+/docs/controller-buttons-*.json
+/docs/controller-stick-*.json
+!/docs/controller-buttons-20260831-201824.json
+!/docs/controller-stick-left-20260831-203619.json
+!/docs/controller-stick-left-20260831-203805.json
+!/docs/controller-stick-right-20260831-204312.json
+
+# Unused wiring preview; the guide uses the corrected diagram.
+/docs/assets/rp2040-zero-wiring-source.png

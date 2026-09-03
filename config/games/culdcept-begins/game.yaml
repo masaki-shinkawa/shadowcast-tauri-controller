@@ -1,0 +1,6 @@
+id: culdcept-begins
+name: カルドセプト ビギンズ
+resolution: [1280, 720]
+defaults:
+  consecutive_frames: 2
+  timeout_ms: 3000

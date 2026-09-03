@@ -83,7 +83,123 @@ export interface AnalysisStatus {
   measuredFps: number;
   averageAnalysisMs: number;
   lastResult: AnalysisResult | null;
+  gameProfile: GameProfileSummary;
+  sceneDetection: SceneDetection;
+  sceneTransitions: SceneTransition[];
   error: string | null;
+}
+
+export type ScenarioState = "idle" | "running" | "stopping" | "stopped" | "completed" | "error";
+
+export interface ScenarioStatus {
+  state: ScenarioState;
+  gameId: string | null;
+  scenarioId: string | null;
+  scenarioName: string | null;
+  currentStepId: string | null;
+  currentAttempt: number | null;
+  lastSceneId: string | null;
+  controllerPort: string | null;
+  completedSteps: number;
+  startedAtMs: number | null;
+  inputLogs: ScenarioInputLog[];
+  runId: string | null;
+  resumedFromRunId: string | null;
+  logDirectory: string | null;
+  evidencePath: string | null;
+  resumeCandidates: ScenarioResumeCandidate[];
+  error: string | null;
+}
+
+export interface ScenarioResumeCandidate {
+  stepId: string;
+  sceneId: string;
+}
+
+export interface ScenarioInputLog {
+  atMs: number;
+  stepId: string;
+  inputType: "tap" | "hold";
+  button: string;
+  holdMs: number;
+}
+
+export type ManualControllerConnectionState = "disconnected" | "connected" | "error";
+
+export interface ManualControllerStatus {
+  state: ManualControllerConnectionState;
+  port: string | null;
+  availablePorts: string[];
+  error: string | null;
+}
+
+export type ManualControllerButton =
+  | "A"
+  | "B"
+  | "X"
+  | "Y"
+  | "UP"
+  | "DOWN"
+  | "LEFT"
+  | "RIGHT"
+  | "L"
+  | "R"
+  | "ZL"
+  | "ZR"
+  | "PLUS"
+  | "MINUS"
+  | "L_STICK"
+  | "R_STICK"
+  | "HOME"
+  | "CAPTURE";
+
+export type ManualControllerStick = "left" | "right";
+
+export interface StabilityConfig {
+  consecutiveFrames: number;
+  timeoutMs: number;
+}
+
+export interface SceneSummary {
+  id: string;
+  detectorCount: number;
+  combination: "all" | "any";
+  stability: StabilityConfig;
+}
+
+export interface GameProfileSummary {
+  gameId: string;
+  gameName: string;
+  resolution: [number, number];
+  scenes: SceneSummary[];
+}
+
+export interface DetectorEvidence {
+  detectorType: string;
+  matched: boolean;
+  confidence: number;
+  observed: number;
+  expected: string;
+  region: [number, number, number, number];
+  detail: string;
+}
+
+export interface SceneDetection {
+  gameId: string;
+  sceneId: string;
+  confidence: number;
+  detectedAtMs: number;
+  frameNumber: number;
+  evidence: DetectorEvidence[];
+  consecutiveFrames: number;
+  candidateSceneId: string | null;
+  candidateConsecutiveFrames: number;
+}
+
+export interface SceneTransition {
+  fromSceneId: string;
+  detection: SceneDetection;
+  reason: string;
 }
 
 export interface AnalysisTemplateInput {
@@ -150,6 +266,65 @@ export async function reportPreviewMetrics(metrics: PreviewMetrics): Promise<voi
 
 export async function getAnalysisStatus(): Promise<AnalysisStatus> {
   return invoke<AnalysisStatus>("get_analysis_status");
+}
+
+export async function loadGameConfig(gameId: string): Promise<AnalysisStatus> {
+  return invoke<AnalysisStatus>("load_game_config", { gameId });
+}
+
+export async function getScenarioStatus(): Promise<ScenarioStatus> {
+  return invoke<ScenarioStatus>("get_scenario_status");
+}
+
+export async function startScenario(gameId: string, scenarioId: string): Promise<ScenarioStatus> {
+  return invoke<ScenarioStatus>("start_scenario", { gameId, scenarioId });
+}
+
+export async function resumeScenario(
+  gameId: string,
+  scenarioId: string,
+  stepId: string,
+): Promise<ScenarioStatus> {
+  return invoke<ScenarioStatus>("resume_scenario", { gameId, scenarioId, stepId });
+}
+
+export async function stopScenario(): Promise<ScenarioStatus> {
+  return invoke<ScenarioStatus>("stop_scenario");
+}
+
+export async function getManualControllerStatus(): Promise<ManualControllerStatus> {
+  return invoke<ManualControllerStatus>("get_manual_controller_status");
+}
+
+export async function connectManualController(port: string): Promise<ManualControllerStatus> {
+  return invoke<ManualControllerStatus>("connect_manual_controller", { port });
+}
+
+export async function disconnectManualController(): Promise<ManualControllerStatus> {
+  return invoke<ManualControllerStatus>("disconnect_manual_controller");
+}
+
+export async function setManualControllerButton(
+  button: ManualControllerButton,
+  pressed: boolean,
+): Promise<void> {
+  return invoke("set_manual_controller_button", { button, pressed });
+}
+
+export async function setManualControllerStick(
+  stick: ManualControllerStick,
+  x: number,
+  y: number,
+): Promise<void> {
+  return invoke("set_manual_controller_stick", { stick, x, y });
+}
+
+export async function neutralizeManualController(): Promise<void> {
+  return invoke("neutralize_manual_controller");
+}
+
+export async function saveGameScreenshot(frame: FrameBytes): Promise<string> {
+  return invoke<string>("save_game_screenshot", { jpeg: Array.from(frame) });
 }
 
 export async function configureAnalysis(config: AnalysisConfig): Promise<AnalysisStatus> {
