@@ -10,6 +10,9 @@ use serde::{Deserialize, Serialize};
 use tauri::Manager;
 use tracing::{info, warn};
 
+use crate::diagnostics::{
+    unix_time_ms as diagnostic_time_ms, write_live_snapshot, DiagnosticFrame,
+};
 use crate::game_state::{
     default_games_root, load_default_profile, GameProfile, GameProfileSummary, SceneDetection,
     SceneDetector, SceneTransition,
@@ -276,6 +279,38 @@ pub struct AnalysisManager {
     template: Arc<Mutex<Option<AnalysisTemplate>>>,
     games_root: PathBuf,
     game_profile: Arc<Mutex<Arc<GameProfile>>>,
+    latest_frame: Arc<Mutex<Option<DiagnosticFrame>>>,
+    diagnostics_root: Option<PathBuf>,
+}
+
+#[derive(Clone)]
+pub(crate) struct SceneStatusReader {
+    status: Arc<Mutex<AnalysisStatus>>,
+    latest_frame: Arc<Mutex<Option<DiagnosticFrame>>>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct SceneStatusSnapshot {
+    pub running: bool,
+    pub game_id: String,
+    pub scene_id: String,
+    pub detection: SceneDetection,
+}
+
+impl SceneStatusReader {
+    pub fn snapshot(&self) -> SceneStatusSnapshot {
+        let status = lock(&self.status);
+        SceneStatusSnapshot {
+            running: matches!(status.state, AnalysisState::Running),
+            game_id: status.scene_detection.game_id.clone(),
+            scene_id: status.scene_detection.scene_id.clone(),
+            detection: status.scene_detection.clone(),
+        }
+    }
+
+    pub fn latest_frame(&self) -> Option<DiagnosticFrame> {
+        lock(&self.latest_frame).clone()
+    }
 }
 
 impl Default for AnalysisManager {
@@ -287,6 +322,13 @@ impl Default for AnalysisManager {
 
 impl AnalysisManager {
     pub fn from_games_root(games_root: impl AsRef<Path>) -> Result<Self, String> {
+        Self::from_games_root_with_diagnostics(games_root, None)
+    }
+
+    pub fn from_games_root_with_diagnostics(
+        games_root: impl AsRef<Path>,
+        diagnostics_root: Option<PathBuf>,
+    ) -> Result<Self, String> {
         let games_root = games_root.as_ref().to_path_buf();
         let profile = Arc::new(load_default_profile(&games_root)?);
         Ok(Self {
@@ -300,6 +342,8 @@ impl AnalysisManager {
             template: Arc::new(Mutex::new(None)),
             games_root,
             game_profile: Arc::new(Mutex::new(profile)),
+            latest_frame: Arc::new(Mutex::new(None)),
+            diagnostics_root,
         })
     }
 }
@@ -346,6 +390,8 @@ impl AnalysisManager {
         let thread_config = Arc::clone(&self.config);
         let thread_template = Arc::clone(&self.template);
         let game_profile = Arc::clone(&lock(&self.game_profile));
+        let latest_frame = Arc::clone(&self.latest_frame);
+        let diagnostics_root = self.diagnostics_root.clone();
         let initial_config = lock(&self.config).clone();
         update_status(&self.status, |status| {
             *status =
@@ -361,6 +407,8 @@ impl AnalysisManager {
                     thread_config,
                     thread_template,
                     game_profile,
+                    latest_frame,
+                    diagnostics_root,
                 );
             })
             .map_err(|error| {
@@ -404,6 +452,13 @@ impl AnalysisManager {
 
     fn status(&self) -> AnalysisStatus {
         lock(&self.status).clone()
+    }
+
+    pub(crate) fn scene_status_reader(&self) -> SceneStatusReader {
+        SceneStatusReader {
+            status: Arc::clone(&self.status),
+            latest_frame: Arc::clone(&self.latest_frame),
+        }
     }
 
     fn configure(&self, config: AnalysisConfig) -> Result<AnalysisStatus, String> {
@@ -554,6 +609,8 @@ fn run_analysis_worker(
     config: Arc<Mutex<AnalysisConfig>>,
     template: Arc<Mutex<Option<AnalysisTemplate>>>,
     game_profile: Arc<GameProfile>,
+    latest_frame: Arc<Mutex<Option<DiagnosticFrame>>>,
+    diagnostics_root: Option<PathBuf>,
 ) {
     info!("analysis worker started");
     let mut next_allowed = Instant::now();
@@ -563,6 +620,7 @@ fn run_analysis_worker(
     let detector_started = Instant::now();
     let mut scene_detector = SceneDetector::new(Arc::clone(&game_profile));
     let mut last_frame_number = 0;
+    let mut next_live_snapshot = Instant::now();
 
     loop {
         let frame = match queue.take_after(next_allowed, STATE_WATCHDOG_INTERVAL) {
@@ -585,6 +643,11 @@ fn run_analysis_worker(
             QueueTake::Closed => break,
         };
         last_frame_number = frame.number;
+        let diagnostic_frame = DiagnosticFrame {
+            frame_number: frame.number,
+            captured_at_ms: diagnostic_time_ms(),
+            jpeg: frame.jpeg.clone(),
+        };
         let (current_config, current_template) = {
             let current_config = lock(&config);
             let current_template = lock(&template);
@@ -664,6 +727,18 @@ fn run_analysis_worker(
                     analysis_status.error = Some(message);
                 });
             }
+        }
+
+        *lock(&latest_frame) = Some(diagnostic_frame.clone());
+
+        if Instant::now() >= next_live_snapshot {
+            if let Some(root) = diagnostics_root.as_deref() {
+                let detection = lock(&status).scene_detection.clone();
+                if let Err(error) = write_live_snapshot(root, &detection, &diagnostic_frame) {
+                    warn!(%error, "failed to update live automation diagnostics");
+                }
+            }
+            next_live_snapshot = Instant::now() + Duration::from_secs(1);
         }
 
         let interval = Duration::from_secs_f64(1.0 / f64::from(current_config.max_fps));

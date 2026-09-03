@@ -1,0 +1,118 @@
+id: money-collect-automation
+name: 金策自動化
+game_id: culdcept-begins
+entry_step_id: step-01
+max_runtime_ms: null
+controller:
+  port: COM3
+  baud_rate: 460800
+steps:
+  - id: step-01
+    scene_id: battle-setting
+    inputs:
+      - type: tap
+        button: Y
+        hold_ms: 200
+    wait_after_ms: 1000
+    expected_scene_id: user-turn
+    timeout_ms: 10000
+    retries: 10
+    notes: 対戦設定画面から対戦中画面への遷移
+
+  - id: step-02
+    scene_id: user-turn
+    inputs:
+      - type: hold
+        button: MINUS
+        hold_ms: 2000
+    wait_after_ms: 12000
+    expected_scene_id: win-message
+    timeout_ms: 1000
+    retries: 300
+    notes: 高速化してCPU戦の勝利画面を待つ
+
+  - id: step-03
+    scene_id: win-message
+    inputs:
+      - type: tap
+        button: A
+        hold_ms: 200
+    wait_after_ms: 4000
+    expected_scene_id: winner-summary
+    timeout_ms: 1000
+    retries: 300
+    notes: 勝利メッセージから勝利者まとめ画面への遷移
+
+  - id: step-04
+    scene_id: winner-summary
+    inputs:
+      - type: tap
+        button: A
+        hold_ms: 200
+    wait_after_ms: 1000
+    expected_scene_id: result-battle
+    timeout_ms: 1000
+    retries: 300
+    notes: 勝利者まとめ画面からBATTLE戦績グラフへ遷移
+
+  - id: step-05
+    scene_id: result-battle
+    inputs:
+      - type: tap
+        button: A
+        hold_ms: 200
+    wait_after_ms: 1000
+    expected_scene_id: mvp
+    timeout_ms: 1000
+    retries: 300
+    notes: グラフ途中停止中はAを再試行し、表示完了後にMVP画面へ遷移
+
+  - id: step-06
+    scene_id: mvp
+    inputs:
+      - type: tap
+        button: A
+        hold_ms: 200
+    wait_after_ms: 1000
+    expected_scene_id: reward-next
+    timeout_ms: 1000
+    retries: 300
+    notes: MVP画面からプレイヤー報酬画面へ遷移
+
+  - id: step-07
+    scene_id: reward-next
+    inputs:
+      - type: tap
+        button: A
+        hold_ms: 200
+    wait_after_ms: 1000
+    expected_scene_id: get-cards
+    timeout_ms: 5000
+    retries: 30
+    notes: 経験値表示中はAを再試行し、カード報酬画面へ遷移
+
+  - id: step-08
+    scene_id: get-cards
+    inputs:
+      - type: tap
+        button: DOWN
+        hold_ms: 200
+    wait_after_ms: 1000
+    expected_scene_id: reward-next
+    timeout_ms: 1000
+    retries: 30
+    notes: 操作可能になるまでDOWNを再試行し、次へが黄色の確定状態へ遷移
+
+  - id: step-09
+    scene_id: reward-next
+    inputs:
+      - type: tap
+        button: A
+        hold_ms: 200
+    wait_after_ms: 1000
+    expected_scene_id: battle-setting
+    timeout_ms: 1000
+    retries: 30
+    next_step_id: step-01
+    notes: 追加報酬画面が続く間はAを再試行し、対戦設定画面へ戻る
+failure_action: stop_and_neutralize

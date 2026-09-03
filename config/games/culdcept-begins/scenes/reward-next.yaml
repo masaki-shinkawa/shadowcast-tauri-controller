@@ -1,0 +1,11 @@
+id: reward-next
+priority: 90
+detectors:
+  - type: template_luma_invariant
+    image: assets/components/reward-header.jpg
+    region: [460, 0, 360, 100]
+    threshold: 0.82
+  - type: template
+    image: assets/components/result-white-next-button.jpg
+    region: [1100, 610, 180, 110]
+    threshold: 0.88

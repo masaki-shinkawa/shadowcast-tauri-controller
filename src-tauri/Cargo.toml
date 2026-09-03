@@ -13,10 +13,12 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2.5", features = [] }
 
 [dependencies]
-image = { version = "0.25", default-features = false, features = ["jpeg", "pnm"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "pnm"] }
 nokhwa = { version = "0.10.11", default-features = false, features = ["input-msmf"] }
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 serde_yaml = "0.9"
+serialport = "4.7"
 tauri = { version = "2.11", features = [] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

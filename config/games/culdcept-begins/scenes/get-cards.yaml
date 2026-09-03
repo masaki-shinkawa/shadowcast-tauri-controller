@@ -1,0 +1,15 @@
+id: get-cards
+priority: 130
+detectors:
+  - type: luma
+    region: [910, 110, 340, 360]
+    max: 35
+  - type: template
+    image: assets/components/result-white-next-button.jpg
+    region: [1100, 610, 180, 110]
+    threshold: 0.88
+  - type: color_ratio
+    region: [1120, 632, 139, 74]
+    target: [180, 180, 180]
+    tolerance: 50
+    min_ratio: 0.03

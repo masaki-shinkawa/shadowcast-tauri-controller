@@ -79,6 +79,11 @@ enum DetectorConfig {
         image: String,
         threshold: f64,
     },
+    TemplateLumaInvariant {
+        region: [u32; 4],
+        image: String,
+        threshold: f64,
+    },
     EdgeDensity {
         region: [u32; 4],
         difference_threshold: u8,
@@ -100,6 +105,12 @@ enum Detector {
         min_ratio: f64,
     },
     Template {
+        region: [u32; 4],
+        image_path: String,
+        image: GrayImage,
+        threshold: f64,
+    },
+    TemplateLumaInvariant {
         region: [u32; 4],
         image_path: String,
         image: GrayImage,
@@ -553,10 +564,12 @@ fn load_detector(
     canonical_game_dir: &Path,
     resolution: [u32; 2],
 ) -> Result<Detector, String> {
+    let luma_invariant = matches!(&config, DetectorConfig::TemplateLumaInvariant { .. });
     let region = match &config {
         DetectorConfig::Luma { region, .. }
         | DetectorConfig::ColorRatio { region, .. }
         | DetectorConfig::Template { region, .. }
+        | DetectorConfig::TemplateLumaInvariant { region, .. }
         | DetectorConfig::EdgeDensity { region, .. } => *region,
     };
     validate_region(region, resolution)?;
@@ -591,6 +604,11 @@ fn load_detector(
             region,
             image,
             threshold,
+        }
+        | DetectorConfig::TemplateLumaInvariant {
+            region,
+            image,
+            threshold,
         } => {
             validate_range(threshold, 0.0, 1.0, "template threshold")?;
             let path = game_dir.join(&image);
@@ -616,12 +634,22 @@ fn load_detector(
                     path.display()
                 ));
             }
-            Ok(Detector::Template {
-                region,
-                image_path: image,
-                image: template,
-                threshold,
-            })
+            let detector = if luma_invariant {
+                Detector::TemplateLumaInvariant {
+                    region,
+                    image_path: image,
+                    image: template,
+                    threshold,
+                }
+            } else {
+                Detector::Template {
+                    region,
+                    image_path: image,
+                    image: template,
+                    threshold,
+                }
+            };
+            Ok(detector)
         }
         DetectorConfig::EdgeDensity {
             region,
@@ -723,6 +751,24 @@ fn evaluate_detector(image: &RgbImage, detector: &Detector) -> Result<DetectorEv
                 format!("{image_path} best match at ({x}, {y}), search step {step}"),
             ))
         }
+        Detector::TemplateLumaInvariant {
+            region,
+            image_path,
+            image: template,
+            threshold,
+        } => {
+            let (score, x, y, step) = match_template_luma_invariant(image, *region, template)?;
+            let matched = score >= *threshold;
+            Ok(evidence(
+                "template_luma_invariant",
+                matched,
+                if matched { score } else { 0.0 },
+                score,
+                format!(">= {threshold:.3}"),
+                *region,
+                format!("{image_path} best match at ({x}, {y}), search step {step}"),
+            ))
+        }
         Detector::EdgeDensity {
             region,
             difference_threshold,
@@ -811,6 +857,63 @@ fn match_template(
         best.2,
         step,
     ))
+}
+
+fn match_template_luma_invariant(
+    image: &RgbImage,
+    [x, y, width, height]: [u32; 4],
+    template: &GrayImage,
+) -> Result<(f64, u32, u32, u32), String> {
+    if template.width() > width || template.height() > height {
+        return Err("Template does not fit configured region".to_owned());
+    }
+    let positions_x = width - template.width() + 1;
+    let positions_y = height - template.height() + 1;
+    let comparisons = u64::from(positions_x)
+        * u64::from(positions_y)
+        * u64::from(template.width())
+        * u64::from(template.height());
+    let step = comparison_step(comparisons);
+    let mut best = (-1.0_f64, x, y);
+    for offset_y in stepped_offsets(positions_y, step) {
+        for offset_x in stepped_offsets(positions_x, step) {
+            let mut actual_sum = 0.0;
+            let mut template_sum = 0.0;
+            let mut actual_square_sum = 0.0;
+            let mut template_square_sum = 0.0;
+            let mut product_sum = 0.0;
+            for template_y in 0..template.height() {
+                for template_x in 0..template.width() {
+                    let actual = f64::from(rgb_to_gray(
+                        image
+                            .get_pixel(x + offset_x + template_x, y + offset_y + template_y)
+                            .0,
+                    ));
+                    let expected = f64::from(template.get_pixel(template_x, template_y).0[0]);
+                    actual_sum += actual;
+                    template_sum += expected;
+                    actual_square_sum += actual * actual;
+                    template_square_sum += expected * expected;
+                    product_sum += actual * expected;
+                }
+            }
+            let count = f64::from(template.width()) * f64::from(template.height());
+            let numerator = count * product_sum - actual_sum * template_sum;
+            let denominator = ((count * actual_square_sum - actual_sum * actual_sum)
+                * (count * template_square_sum - template_sum * template_sum))
+                .max(0.0)
+                .sqrt();
+            let score = if denominator > f64::EPSILON {
+                (numerator / denominator).clamp(-1.0, 1.0)
+            } else {
+                0.0
+            };
+            if score > best.0 {
+                best = (score, x + offset_x, y + offset_y);
+            }
+        }
+    }
+    Ok((best.0.max(0.0), best.1, best.2, step))
 }
 
 fn stepped_offsets(count: u32, step: u32) -> impl Iterator<Item = u32> {
@@ -1094,5 +1197,88 @@ mod tests {
     #[test]
     fn unsafe_game_ids_are_rejected() {
         assert!(GameProfile::load(&default_games_root(), "../sample-switch-game").is_err());
+    }
+
+    #[test]
+    fn culdcept_reference_images_match_their_scenes() {
+        let games_root = default_games_root();
+        let profile = GameProfile::load(&games_root, "culdcept-begins")
+            .expect("culdcept profile should load");
+        let game_dir = games_root.join("culdcept-begins");
+        for (image_path, expected_scene) in [
+            ("assets/scenarios/01-battle-setting.jpg", "battle-setting"),
+            ("assets/scenarios/02-user-turn.jpg", "user-turn"),
+            ("assets/scenarios/03-win-message.jpg", "win-message"),
+            ("assets/scenarios/04-screen.jpg", "winner-summary"),
+            ("assets/scenarios/05-screen.jpg", "result-battle"),
+            ("assets/scenarios/05-graph-partial-01.png", "result-battle"),
+            ("assets/scenarios/06-screen.jpg", "mvp"),
+            ("assets/scenarios/07-screen.jpg", "reward-next"),
+            ("assets/scenarios/08-screen.jpg", "get-cards"),
+            ("assets/scenarios/09-screen.jpg", "reward-next"),
+            ("assets/scenarios/10-screen.jpg", "battle-setting"),
+            (
+                "authoring/archive/step-04-onward-20260902/04-winner-summary.jpg",
+                "winner-summary",
+            ),
+            (
+                "authoring/archive/step-04-onward-20260902/05-result.jpg",
+                "result",
+            ),
+            (
+                "authoring/archive/step-04-onward-20260902/05-mvp.jpg",
+                "mvp",
+            ),
+            (
+                "authoring/archive/step-04-onward-20260902/06-get-cards.jpg",
+                "get-cards",
+            ),
+            (
+                "authoring/archive/step-04-onward-20260902/07-player-status.jpg",
+                "reward-next",
+            ),
+            (
+                "authoring/archive/step-04-onward-20260902/07-get-other-reward.jpg",
+                "reward-next",
+            ),
+            (
+                "authoring/archive/step-04-onward-20260902/08-get-com-book.jpg",
+                "reward-next",
+            ),
+        ] {
+            let image = image::open(game_dir.join(image_path))
+                .unwrap_or_else(|error| panic!("failed to load {image_path}: {error}"))
+                .to_rgb8();
+            let detected = profile
+                .classify(&image)
+                .unwrap_or_else(|error| panic!("failed to classify {image_path}: {error}"))
+                .unwrap_or_else(|| panic!("no scene matched {image_path}"));
+            assert_eq!(detected.scene_id, expected_scene, "{image_path}");
+            assert!(
+                detected.evidence.iter().all(|evidence| evidence.matched),
+                "{image_path}"
+            );
+        }
+    }
+
+    #[test]
+    fn culdcept_battle_scene_detection_tolerates_idle_dimming() {
+        let games_root = default_games_root();
+        let profile = GameProfile::load(&games_root, "culdcept-begins")
+            .expect("culdcept profile should load");
+        let mut image =
+            image::open(games_root.join("culdcept-begins/assets/scenarios/01-battle-setting.jpg"))
+                .expect("battle reference should load")
+                .to_rgb8();
+        for pixel in image.pixels_mut() {
+            for channel in &mut pixel.0 {
+                *channel = (f32::from(*channel) * 0.32) as u8;
+            }
+        }
+        let detected = profile
+            .classify(&image)
+            .expect("dimmed frame should classify")
+            .expect("dimmed frame should match");
+        assert_eq!(detected.scene_id, "battle-setting");
     }
 }

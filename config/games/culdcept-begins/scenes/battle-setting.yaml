@@ -1,0 +1,7 @@
+id: battle-setting
+priority: 100
+detectors:
+  - type: template_luma_invariant
+    image: assets/components/battle-start-button.png
+    region: [610, 590, 410, 100]
+    threshold: 0.75

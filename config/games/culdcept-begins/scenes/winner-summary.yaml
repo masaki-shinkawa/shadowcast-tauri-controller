@@ -1,0 +1,17 @@
+id: winner-summary
+priority: 100
+detectors:
+  - type: color_ratio
+    region: [450, 0, 380, 110]
+    target: [190, 160, 60]
+    tolerance: 65
+    min_ratio: 0.15
+  - type: template
+    image: assets/components/result-yellow-next-button.jpg
+    region: [1100, 610, 180, 110]
+    threshold: 0.88
+  - type: color_ratio
+    region: [1120, 632, 139, 74]
+    target: [160, 140, 60]
+    tolerance: 60
+    min_ratio: 0.10

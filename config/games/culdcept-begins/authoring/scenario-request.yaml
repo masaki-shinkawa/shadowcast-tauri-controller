@@ -1,0 +1,256 @@
+# カルドセプト ビギンズ・シナリオ作成依頼用テンプレート
+#
+# このファイルは「人が手書きする依頼票」です。
+# 現在のアプリが直接読み込む実行用YAMLではありません。
+#
+# 書き方:
+#   1. scenario.idとscenario.nameを書く
+#   2. assets/scenarios/<scenario-id>/ に画像を置く
+#   3. entry_step_idに開始stepを書く
+#      stepは通常、stepsに書かれた次の項目へ進む
+#      ループやジャンプが必要なstepだけnext_step_idで遷移先を指定する
+#   4. 各stepのinputsを入力順に書く
+#   5. 分からない項目は null のままでよい
+#   6. 記入後、このYAMLを基に実行用シナリオの作成を依頼する
+
+game:
+  id: culdcept-begins
+  name: カルドセプト ビギンズ
+
+  # ShadowCastがアプリに渡す画像サイズ。
+  # 画像の実際のサイズが異なる場合は書き換える。
+  resolution: [1280, 720]
+
+scenario:
+  # 半角英数字とハイフン推奨。例: collect-daily-bonus
+  id: money-collect-automation
+
+  # 人が読む名前。例: デイリーボーナス受け取り
+  name: 金策自動化
+
+  # 何を完了させる操作か。
+  purpose: 自動的にCPU戦を行い、報酬を受け取ることを繰り返す
+
+  # 自動操作によりセーブ、購入、データ消去などが発生する場合は書く。
+  risks: ["とくになし"]
+
+  # 誤った画面で開始しないための最初の画像。
+  start_screen_image: config\games\culdcept-begins\assets\scenarios\01-battle-setting.jpg
+
+  # シナリオ全体の上限時間。
+  max_runtime_ms: infinity
+
+  # 最初に実行するstep。
+  entry_step_id: step-01
+
+  steps:
+    - id: step-01
+
+      # この操作の直前に表示されている全画面画像。
+      screen_image: config\games\culdcept-begins\assets\scenarios\01-battle-setting.jpg
+
+      # 画面のどこを判定に使うか。[x, y, width, height]
+      # 不明な場合は null。画像を見て後から決められる。
+      recognition_region: 画面中央下に「対戦開始」
+
+      # ボタンだけの切り抜き画像。用意できなければ null。
+      button_image: config\games\culdcept-begins\assets\components\battle-start-button.png
+
+      # 同じ画面で複数回入力する場合は、inputsに操作順で追加する。
+      inputs:
+        # tap: 短押し / hold: 長押し
+        - type: tap
+
+          # A, B, X, Y, UP, DOWN, LEFT, RIGHT, L, R, ZL, ZR,
+          # PLUS, MINUS, L_STICK, R_STICK のいずれか。
+          button: Y
+
+          # tapの標準は200ms。長押しなら必要な時間に変更する。
+          hold_ms: 200
+
+      # inputsをすべて終えた後に待つ最低時間。
+      wait_after_ms: 1000
+
+      # 操作後に表示されるはずの画面。
+      # 次のstepのscreen_imageと同じなら同じパスでよい。
+      expected_screen_image: config\games\culdcept-begins\assets\scenarios\02-user-turn.jpg
+
+      # 期待画面を待つ上限と、失敗時の再試行回数。
+      timeout_ms: 10000
+      retries: 10
+
+      # 画面の動き、表示文言、ボタンの位置などの補足。
+      notes: 対戦設定画面から対戦中画面への遷移
+
+    - id: step-02
+
+      # この操作の直前に表示されている全画面画像。
+      screen_image: config\games\culdcept-begins\assets\scenarios\02-user-turn.jpg
+
+      # 画面のどこを判定に使うか。[x, y, width, height]
+      # 不明な場合は null。画像を見て後から決められる。
+      recognition_region: 画面中央にOK
+
+      # ボタンだけの切り抜き画像。用意できなければ null。
+      button_image: config\games\culdcept-begins\assets\components\battle-ok-button.jpg
+
+      # 同じ画面で複数回入力する場合は、inputsに操作順で追加する。
+      inputs:
+        # tap: 短押し / hold: 長押し
+        - type: hold
+
+          # A, B, X, Y, UP, DOWN, LEFT, RIGHT, L, R, ZL, ZR,
+          # PLUS, MINUS, L_STICK, R_STICK のいずれか。
+          button: MINUS
+
+          # tapの標準は200ms。長押しなら必要な時間に変更する。
+          hold_ms: 2000
+
+      # inputsをすべて終えた後に待つ最低時間。
+      wait_after_ms: 12000
+
+      # 操作後に表示されるはずの画面。
+      # 次のstepのscreen_imageと同じなら同じパスでよい。
+      expected_screen_image: config\games\culdcept-begins\assets\scenarios\03-win-message.jpg
+
+      # 期待画面を待つ上限と、失敗時の再試行回数。
+      timeout_ms: 1000
+      retries: 15
+
+      # 画面の動き、表示文言、ボタンの位置などの補足。
+      notes: 先頭画面から勝利メッセージの表示
+
+    - id: step-03
+
+      # この操作の直前に表示されている全画面画像。
+      screen_image: config\games\culdcept-begins\assets\scenarios\03-win-message.jpg
+
+      # 画面のどこを判定に使うか。[x, y, width, height]
+      # 不明な場合は null。画像を見て後から決められる。
+      recognition_region: 画面中央に勝利メッセージ
+
+      # ボタンだけの切り抜き画像。用意できなければ null。
+      button_image: config\games\culdcept-begins\assets\components\win-message.jpg
+
+      # 同じ画面で複数回入力する場合は、inputsに操作順で追加する。
+      inputs:
+        # tap: 短押し / hold: 長押し
+        - type: tap
+
+          # A, B, X, Y, UP, DOWN, LEFT, RIGHT, L, R, ZL, ZR,
+          # PLUS, MINUS, L_STICK, R_STICK のいずれか。
+          button: A
+
+          # tapの標準は200ms。長押しなら必要な時間に変更する。
+          hold_ms: 200
+
+      # inputsをすべて終えた後に待つ最低時間。
+      wait_after_ms: 4000
+
+      # 操作後に表示されるはずの画面。
+      # 次のstepのscreen_imageと同じなら同じパスでよい。
+      expected_screen_image: config\games\culdcept-begins\assets\scenarios\04-screen.jpg
+
+      # 期待画面を待つ上限と、失敗時の再試行回数。
+      timeout_ms: 1000
+      retries: 300
+
+      # 画面の動き、表示文言、ボタンの位置などの補足。
+      notes: 勝利メッセージから勝利者のまとめ画面への遷移
+
+    - id: step-04
+      screen_image: config\games\culdcept-begins\assets\scenarios\04-screen.jpg
+      recognition_region: [1100, 610, 180, 110]
+      button_image: config\games\culdcept-begins\assets\components\result-yellow-next-button.jpg
+      inputs:
+        - type: tap
+          button: A
+          hold_ms: 200
+      wait_after_ms: null
+      expected_screen_image: config\games\culdcept-begins\assets\scenarios\05-screen.jpg
+      timeout_ms: null
+      retries: null
+      notes: 画面上部に「WINNER」、右下に「次へ」。Aを200ms短押し。
+
+    - id: step-05
+      screen_image: config\games\culdcept-begins\assets\scenarios\05-screen.jpg
+      recognition_region: [20, 25, 400, 240]
+      button_image: config\games\culdcept-begins\assets\components\result-yellow-next-button.jpg
+      inputs:
+        - type: tap
+          button: A
+          hold_ms: 200
+      wait_after_ms: null
+      expected_screen_image: config\games\culdcept-begins\assets\scenarios\06-screen.jpg
+      timeout_ms: null
+      retries: null
+      notes: 左上に「BATTLE」とマップ、中央に戦績グラフ、右下に「次へ」。ライブ判定はwinner-summaryのままで、既存検出器ではStep 4と区別できていない。現在の画像はグラフ表示完了後。通常はグラフ描画中に何度か停止し、その都度Aの200ms短押しが必要。追加陽性画像 config\games\culdcept-begins\assets\scenarios\05-graph-partial-01.png はRound 1で停止中。必要回数と入力間隔は固定せず、result-battleを維持している間の再試行で進める候補。
+
+    - id: step-06
+      screen_image: config\games\culdcept-begins\assets\scenarios\06-screen.jpg
+      recognition_region: [450, 35, 380, 150]
+      button_image: config\games\culdcept-begins\assets\components\result-yellow-next-button.jpg
+      inputs:
+        - type: tap
+          button: A
+          hold_ms: 200
+      wait_after_ms: null
+      expected_screen_image: config\games\culdcept-begins\assets\scenarios\07-screen.jpg
+      timeout_ms: null
+      retries: null
+      notes: 画面上部に「MVP」と「領地の魔力No.1」、中央に報酬G3000、右下に「次へ」。Aを200ms短押し。
+
+    - id: step-07
+      screen_image: config\games\culdcept-begins\assets\scenarios\07-screen.jpg
+      recognition_region: [460, 0, 360, 100]
+      button_image: config\games\culdcept-begins\assets\components\result-yellow-next-button.jpg
+      inputs:
+        - type: tap
+          button: A
+          hold_ms: 200
+      wait_after_ms: null
+      expected_screen_image: config\games\culdcept-begins\assets\scenarios\08-screen.jpg
+      timeout_ms: null
+      retries: null
+      notes: 画面上部に「REWARD」、中央に所持コイン、レベル、経験値バー、右下に「次へ」。現在の画像は経験値バー表示完了後。通常は経験値バーの表示途中をAの200ms短押しでスキップでき、時間経過でも表示完了する。必要回数と入力間隔は未確認。
+
+    - id: step-08
+      screen_image: config\games\culdcept-begins\assets\scenarios\08-screen.jpg
+      recognition_region: [240, 80, 530, 220]
+      button_image: config\games\culdcept-begins\assets\components\result-white-next-button.jpg
+      inputs:
+        - type: tap
+          button: DOWN
+          hold_ms: 200
+      wait_after_ms: null
+      expected_screen_image: config\games\culdcept-begins\assets\scenarios\09-screen.jpg
+      timeout_ms: null
+      retries: null
+      notes: 画面上部に「REWARD」、左上にカード報酬一覧と「決定」、右側に選択カードの詳細、右下に「次へ」。ライブ判定はget-cardsだがconfidence 0.5206で低め。既存検出器は右下ボタン中心で、他の報酬画面との区別に曖昧さがある。表示直後は数秒間操作できない。操作可能になったらDOWNを200ms短押しし、「次へ」が黄色になった状態を次のStepとして検出してからAを200ms短押しする。操作不可時間は未確認。
+
+    - id: step-09
+      screen_image: config\games\culdcept-begins\assets\scenarios\09-screen.jpg
+      recognition_region: [1100, 610, 180, 110]
+      button_image: config\games\culdcept-begins\assets\components\result-yellow-next-button.jpg
+      inputs:
+        - type: tap
+          button: A
+          hold_ms: 200
+      wait_after_ms: null
+      expected_screen_image: config\games\culdcept-begins\assets\scenarios\10-screen.jpg
+      timeout_ms: null
+      retries: null
+      next_step_id: step-01
+      notes: DOWN後のカード報酬確定状態。右側のカード詳細と「決定」表示が消え、右下の「次へ」が黄色の選択可能状態。ライブ判定はreward-next、confidence 0.9090。Aを200ms短押しすると対戦設定画面へ戻り、Step 1から次の周回を始める。専用検出器は追加の陽性キャプチャがないため保留。
+
+  finish:
+    # next_step_idがnull、またはnext_step_idを省略した最後のstepを
+    # 成功したときに使う完了条件。
+    # このシナリオは無限ループするため、明示的な完了画面はない。
+    screen_image: null
+    notes: step-01からstep-09を繰り返す無限ループ。step-09成功後はstep-01へ戻る。
+
+  failure:
+    # 失敗時は新しい入力を止め、全ボタン解放・スティック中央に戻す前提。
+    action: stop_and_neutralize
+    notes: null
